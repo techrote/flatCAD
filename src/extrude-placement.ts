@@ -1,52 +1,61 @@
-/** Overlay placement, in canvas-local CSS pixels. Major-grid distance is never a CSS constant. */
-export type Rectangle2 = { left: number; top: number; right: number; bottom: number };
-export type Dimensions = { width: number; height: number };
-export type Position = { x: number; y: number; side: "right" | "left" | "below" | "above" };
-const overlap = (a: Rectangle2, b: Rectangle2) =>
-  Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) *
-  Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
-const boxAt = (x: number, y: number, d: Dimensions): Rectangle2 =>
-  ({ left: x, top: y, right: x + d.width, bottom: y + d.height });
+/** Position popup with one corner at cursor. Only the extrusion arrow may displace it. */
+export type Dimensions={width:number,height:number};
+export type Point={x:number,y:number};
+export type CursorCorner="top-left"|"top-right"|"bottom-left"|"bottom-right";
+export type Placement={x:number,y:number,corner:CursorCorner,arrowAvoidancePx:number};
+export type Rectangle2={left:number,top:number,right:number,bottom:number};
 
-/** Prefer exactly one major-grid interval between popover and geometry.
- *  Try the opposite sides before moving closer due to an undersized viewport.
- *  Penalize intersection with the extrusion arrow more than ordinary geometry.
- */
-export function placeExtrudeMenu(args: {
-  viewport: Dimensions; selection: Rectangle2; popup: Dimensions;
-  majorGridPixels: number; arrow?: { x: number; y: number } | null;
-}): Position {
-  const { viewport, selection: a, popup: p } = args;
-  const gap = Math.max(0, args.majorGridPixels);
-  const cx = (a.left + a.right) / 2, cy = (a.top + a.bottom) / 2;
-  const candidates: Position[] = [
-    { side: "right", x: a.right + gap, y: cy - p.height / 2 },
-    { side: "left", x: a.left - gap - p.width, y: cy - p.height / 2 },
-    { side: "below", x: cx - p.width / 2, y: a.bottom + gap },
-    { side: "above", x: cx - p.width / 2, y: a.top - gap - p.height },
+function overlap(a:Rectangle2,b:Rectangle2):number{
+  return Math.max(0,Math.min(a.right,b.right)-Math.max(a.left,b.left)) *
+    Math.max(0,Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top));
+}
+function rect(x:number,y:number,p:Dimensions):Rectangle2{
+  return {left:x,top:y,right:x+p.width,bottom:y+p.height};
+}
+/** No sketch-overlap test: the corner closest to the cursor is preferred unless
+ *  it would cover the arrow or leave the viewport. If the arrow lies under the
+ *  popup, move the popup HORIZONTALLY just far enough to expose the handle. */
+export function placeExtrudeMenu(args:{
+  viewport:Dimensions;cursor:Point;popup:Dimensions;arrow?:Point|null;
+}):Placement{
+  const {viewport:v,cursor:c,popup:p}=args;
+  const margin=8,clearance=16;
+  const maxX=Math.max(margin,v.width-p.width-margin);
+  const maxY=Math.max(margin,v.height-p.height-margin);
+  const clamp=(n:number,low:number,high:number)=>Math.max(low,Math.min(high,n));
+  const arrowRect=args.arrow?{
+    left:args.arrow.x-clearance,right:args.arrow.x+clearance,
+    top:args.arrow.y-clearance,bottom:args.arrow.y+clearance
+  }:null;
+  const corners:{corner:CursorCorner,x:number,y:number}[]=[
+    {corner:"top-left",x:c.x,y:c.y},
+    {corner:"top-right",x:c.x-p.width,y:c.y},
+    {corner:"bottom-left",x:c.x,y:c.y-p.height},
+    {corner:"bottom-right",x:c.x-p.width,y:c.y-p.height},
   ];
-  const padding = 10;
-  const inBounds = (pos: Position) =>
-    pos.x >= padding && pos.y >= padding &&
-    pos.x + p.width <= viewport.width - padding &&
-    pos.y + p.height <= viewport.height - padding;
-  const arrow: Rectangle2 | null = args.arrow
-    ? { left: args.arrow.x - 28, right: args.arrow.x + 50, top: args.arrow.y - 20, bottom: args.arrow.y + 20 }
-    : null;
-  const score = (pos: Position) => {
-    const rect = boxAt(pos.x, pos.y, p);
-    return overlap(rect, a) * 10 + (arrow ? overlap(rect, arrow) * 60 : 0);
-  };
-  const clean = candidates.filter(pos => inBounds(pos) && score(pos) === 0);
-  if (clean.length > 0) return clean[0];
-  const fitting = candidates.filter(inBounds).sort((x, y) => score(x) - score(y));
-  if (fitting.length > 0) return fitting[0];
-  // On a tiny canvas no candidate fits: clamp and minimize obstruction.
-  const clamped = candidates.map(c => ({
-    ...c,
-    x: Math.max(padding, Math.min(viewport.width - p.width - padding, c.x)),
-    y: Math.max(padding, Math.min(viewport.height - p.height - padding, c.y)),
-  }));
-  clamped.sort((a, b) => score(a) - score(b));
-  return clamped[0];
+  const scored=corners.map((candidate,index)=>{
+    const x=clamp(candidate.x,margin,maxX);
+    const y=clamp(candidate.y,margin,maxY);
+    const dislocation=Math.abs(x-candidate.x)+Math.abs(y-candidate.y);
+    const arrowOverlap=arrowRect?overlap(rect(x,y,p),arrowRect):0;
+    // Caller receives the exact cursor corner when there is room.
+    return {...candidate,index,x,y,dislocation,arrowOverlap};
+  });
+  for(const candidate of scored){
+    if(candidate.dislocation===0&&candidate.arrowOverlap===0)
+      return {x:candidate.x,y:candidate.y,corner:candidate.corner,arrowAvoidancePx:0};
+  }
+  const first=scored[0],other=scored.filter(c=>c.dislocation===0&&c.arrowOverlap===0)[0];
+  if(other)return {x:other.x,y:other.y,corner:other.corner,arrowAvoidancePx:0};
+  const chosen=scored.sort((a,b)=>(a.dislocation+a.arrowOverlap*1000+a.index*.01)-
+                                       (b.dislocation+b.arrowOverlap*1000+b.index*.01))[0];
+  let x=chosen.x,y=chosen.y,offset=0;
+  if(arrowRect&&overlap(rect(x,y,p),arrowRect)>0){
+    const left=arrowRect.left-p.width, right=arrowRect.right;
+    const options=[left,right].filter(candidate=>candidate>=margin&&candidate<=maxX)
+      .filter(candidate=>overlap(rect(candidate,y,p),arrowRect)===0)
+      .sort((a,b)=>Math.abs(a-x)-Math.abs(b-x));
+    if(options.length){offset=options[0]-x;x=options[0];}
+  }
+  return {x,y,corner:chosen.corner,arrowAvoidancePx:offset};
 }
