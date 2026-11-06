@@ -6,8 +6,15 @@ const goldenVolume = (100 * 60 - 2 * Math.PI * 5 * 5) * 8;
 test("golden plate regenerates with B-rep volume and produces a STEP file", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", error => pageErrors.push(error.message));
+  const externalRequests: string[] = [];
+  page.on("request", request => {
+    const host = new URL(request.url()).hostname;
+    if (host !== "127.0.0.1") externalRequests.push(request.url());
+  });
   await page.goto("/");
   await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await expect(page.locator("#preview canvas")).toHaveCount(1);
+  await page.screenshot({ path: test.info().outputPath("golden-preview.png"), fullPage: true });
   const volume = Number(await page.locator("#status").getAttribute("data-volume-mm3"));
   const bounds = JSON.parse((await page.locator("#status").getAttribute("data-bounds-mm")) || "null");
   expect(Math.abs(volume - goldenVolume)).toBeLessThan(0.0001);
@@ -22,6 +29,7 @@ test("golden plate regenerates with B-rep volume and produces a STEP file", asyn
   expect(data.length).toBeGreaterThan(500);
   expect(data.subarray(0, 300).toString("utf8")).toContain("ISO-10303-21");
   expect(pageErrors).toEqual([]);
+  expect(externalRequests).toEqual([]);
 });
 
 test("draw a profile and add an editable extrusion", async ({ page }) => {

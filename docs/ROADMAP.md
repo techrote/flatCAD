@@ -16,8 +16,8 @@
 - [x] OpenCascade/replicad worker and B-rep add/cut source implementation.
 - [x] Three.js preview and STEP export source implementation.
 - [ ] Verify deterministic dependency lockfile in CI.
-- [ ] Execute a real browser (not just a build) with the shipped WASM.
-- [ ] Measure computed volume for analytic demo against expected result.
+- [x] Execute real Chromium browser (Vite development) with shipped WASM — [run 42223576762](https://github.com/techrote/flatCAD/actions/runs/42223576762).
+- [x] Compare B-rep volume and bounds against analytic goldens — same headless-browser run.
 - [ ] Independently reopen and interrogate STEP output.
 - [ ] Retain browser evidence/artifacts and performance baseline.
 - [ ] Independent review and decision to merge.
