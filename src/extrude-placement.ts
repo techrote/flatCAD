@@ -47,7 +47,7 @@ export function placeExtrudeMenu(args:{
     // Prefer the original cursor corner over switching attachment corners
     // for only a few pixels. This keeps an arrow-avoidance shift visually
     // understandable even when a large popup nearly fills the canvas.
-    return {...candidate,x,y,sideShift,
+    return {...candidate,anchorX:candidate.x,x,y,sideShift,
       score:obstruction*100000+displacement+index*25};
   });
   scored.sort((a,b)=>a.score-b.score);
@@ -55,5 +55,5 @@ export function placeExtrudeMenu(args:{
   // Include viewport-edge displacement as well as arrow clearance: the
   // returned offset describes where this chosen corner actually lands.
   return {x:best.x,y:best.y,corner:best.corner,
-    arrowAvoidancePx:best.x-best.candidate.x};
+    arrowAvoidancePx:best.x-best.anchorX};
 }
