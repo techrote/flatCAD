@@ -222,3 +222,33 @@ kbd{
   padding:7px 9px;color:#ffe1b9;background:#62452e9c;
   border-radius:5px;font:11px ui-monospace,monospace;white-space:nowrap;
 }
+
+/* Cursor-attached extrusion parameters and face-pick affordances. */
+.extrude-flyout .flyout-face-hint{
+  border-top:1px solid #3c536f;
+  padding:9px 0 1px;
+  color:#aec7dd;
+  line-height:1.55;
+  font-size:11px;
+}
+.extrude-flyout .flyout-face-hint strong{color:#dfeefe;font-weight:650}
+.extrude-flyout .flyout-nav-hint{
+  border-top:1px solid #3a506b;
+  display:block;
+  padding-top:10px;
+  color:#a2bbd3;
+  font:10px ui-monospace,Consolas,monospace;
+}
+.settings-dialog #navigation-preset{
+  background:#0a1828;color:#d8e8f5;
+  border:1px solid #3e5d7b;border-radius:5px;
+  padding:11px 12px;font:13px ui-sans-serif,system-ui,sans-serif;
+  width:100%;
+}
+.settings-dialog .navigation-hint{
+  margin:16px 0 4px;
+  color:#96b7d3;line-height:1.5;font-size:12px;
+}
+.extrude-flyout input[type="number"]:focus{
+  outline:2px solid #66acef;outline-offset:0;
+}
