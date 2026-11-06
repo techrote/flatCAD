@@ -10,6 +10,7 @@ import { placeExtrudeMenu } from "./extrude-placement";
 import { depthToFace } from "./signed-extrusion";
 import { NAVIGATION_HINTS, NAVIGATION_LABELS, NAVIGATION_PRESETS, type NavigationPreset } from "./navigation";
 import type { KernelBuild } from "./kernel-protocol";
+import { featureForSurface, formatSurfaceTarget, type SurfaceTarget } from "./surface-interaction";
 import { SketchCanvas, type SketchTool } from "./sketch-canvas-v2";
 import { KernelClient } from "./kernel-client";
 import { Preview } from "./preview";
@@ -88,7 +89,10 @@ root.innerHTML=[
   '      <section class="panel preview-panel">',
   '        <div class="panel-head compact-head"><div class="header-label"><span class="panel-index">02</span><div><strong>Solid</strong><small>Orbit · zoom · inspect</small></div></div><span class="chip">Z ↑</span></div>',
   '        <div id="preview" class="preview-root"><span class="placeholder">Loading 3D preview…</span></div>',
+  '        <span id="face-target-label" class="face-target-label" hidden></span>',
+  '        <div id="face-context-menu" class="face-context-menu" role="menu" hidden></div>',
   '        <span id="solid-preview-status" class="solid-preview-status" hidden>PREVIEW · NOT APPLIED</span>',
+  '        <span id="cut-tool-metrics" class="cut-tool-metrics" hidden></span>',
   '      </section>',
   '      <div class="inspector-drawer">',
   '        <details id="properties-details" class="drawer"><summary>Properties <span id="selection-name" class="muted">Nothing selected</span></summary>',
@@ -112,7 +116,9 @@ root.innerHTML=[
   '  <div id="grid-rows" class="dialog-scroll"></div><div id="grid-error" role="alert" class="validation-error"></div>',
   '  <footer><button id="grid-reset" class="button">Reset defaults</button><button data-close="grid-dialog" class="button primary">Done</button></footer></dialog>',
   '<dialog id="navigation-dialog" class="settings-dialog"><div class="dialog-head"><div><strong>CAD navigation controls</strong><small>Choose the mouse behavior familiar from your CAD application.</small></div><button data-close="navigation-dialog">×</button></div>',
-  '  <div class="dialog-scroll"><label class="field"><span>Control scheme</span><select id="navigation-preset" aria-label="Navigation control scheme"></select></label><p id="navigation-hint" class="navigation-hint"></p></div>',
+  '  <div class="dialog-scroll"><label class="field"><span>Control scheme</span><select id="navigation-preset" aria-label="Navigation control scheme"></select></label><p id="navigation-hint" class="navigation-hint"></p>',
+  '  <label class="check remember-surface-setting"><input id="remember-surfaces" type="checkbox" checked> Remember mouse interaction surfaces</label>',
+  '  <small class="navigation-hint">When enabled, a new extrusion starts at the last clicked horizontal face elevation.</small></div>',
   '  <footer><button data-close="navigation-dialog" class="button primary">Done</button></footer></dialog>'
 ].join("\n");
 
@@ -142,6 +148,9 @@ let activeMenu:string|null=null;
 let extrudeTarget:string|null=null,extrudeTargets:string[]=[];
 let extrudeCursor:{x:number,y:number}|null=null;
 let facePickField:"z"|"depth"="depth";
+let lastSurfaceZ:number|null=null;
+let contextSurface:SurfaceTarget|null=null;
+let contextFeatureId:string|null=null;
 let previewEnabled=true,previewToken=0,previewInFlight=false;
 let previewTimer:ReturnType<typeof setTimeout>|undefined;
 let committedBuild:KernelBuild|null=null;
@@ -183,7 +192,12 @@ let preview:Preview|null=null;
 try{
   const host=byId("preview");host.replaceChildren();preview=new Preview(host);
   preview.setNavigationPreset(prefs.navigation);
-  preview.setFacePickHandler(z=>fillFocusedFieldFromFace(z));
+  preview.setFacePickHandler(z=>{
+    if(z!==null)lastSurfaceZ=z;
+    fillFocusedFieldFromFace(z);
+  });
+  preview.setSurfaceHoverHandler((target,pointer)=>updateSurfaceLabel(target,pointer));
+  preview.setSurfaceMenuHandler((target,pointer)=>showSurfaceContext(target,pointer));
 }catch(error){
   byId("preview").textContent="3D preview unavailable; sketching and STEP export remain available";
   status(String(error),true);
@@ -201,6 +215,7 @@ function persistPreferences():void{
     prefs=validatePreferences(prefs);savePreferences(prefs);canvas.setPreferences(prefs);
     preview?.setNavigationPreset(prefs.navigation);
     byId("extrude-nav-hint").textContent=NAVIGATION_HINTS[prefs.navigation];
+    input("remember-surfaces").checked=prefs.rememberSurfaces;
     if(extrudeTarget)positionExtrudeMenu();
   }catch(error){status("Settings invalid: "+String(error),true);}
 }
@@ -457,6 +472,10 @@ function textNode(text:string):HTMLElement{
 }
 function restoreCommittedPreview():void {
   const host=byId("preview");
+  delete host.dataset.cutToolVolumeMm3;
+  delete host.dataset.cutRemovedVolumeMm3;
+  delete host.dataset.cutToolBoundsMm;
+  byId("cut-tool-metrics").hidden=true;
   delete host.dataset.previewState;
   delete host.dataset.previewVolumeMm3;
   delete host.dataset.previewOperation;
@@ -470,6 +489,7 @@ function closeExtrude():void {
   extrudeTarget=null;
   extrudeTargets=[];
   byId("extrude-flyout").hidden=true;
+  hideSurfaceContext();
   canvas.setExtrudeHandle(null);
   restoreCommittedPreview();
 }
@@ -574,12 +594,30 @@ function scheduleOperationPreview():void {
     if(previewInFlight)return;
     previewInFlight=true;
     try{
-      const result=await kernel.build(candidate);
+      const pendingIds=candidate.features.slice(source.features.length).map(f=>f.id);
+      const result=await kernel.build(candidate,{cutToolFeatureIds:mode==="cut"?pendingIds:[]});
       if(token!==previewToken||doc!==source||!extrudeTargets.length||!input("extrude-preview").checked)return;
-      preview?.setMesh(result.mesh,{pending:mode,preserveCamera:true});
+      preview?.setMesh(result.mesh,{pending:mode,preserveCamera:true,
+        cutTool:result.cutTool?.mesh});
       host.dataset.previewState="ready";
       host.dataset.previewOperation=mode;
       if(result.statistics)host.dataset.previewVolumeMm3=String(result.statistics.volumeMm3);
+      const metrics=byId("cut-tool-metrics");
+      if(mode==="cut"&&result.cutTool&&result.statistics&&lastStats){
+        const full=result.cutTool.statistics.volumeMm3;
+        const removed=Math.max(0,lastStats.volumeMm3-result.statistics.volumeMm3);
+        host.dataset.cutToolVolumeMm3=String(full);
+        host.dataset.cutRemovedVolumeMm3=String(removed);
+        host.dataset.cutToolBoundsMm=JSON.stringify(result.cutTool.statistics.boundsMm);
+        metrics.textContent="Red tool: "+full.toFixed(2)+" mm³ · Material removed: "+
+          removed.toFixed(2)+" mm³ · Overshoot shown";
+        metrics.hidden=false;
+      }else{
+        delete host.dataset.cutToolVolumeMm3;
+        delete host.dataset.cutRemovedVolumeMm3;
+        delete host.dataset.cutToolBoundsMm;
+        metrics.hidden=true;
+      }
       label.hidden=false;
       label.textContent="PREVIEW · "+mode.toUpperCase()+" · NOT APPLIED";
     }catch(e){
@@ -612,8 +650,15 @@ function updateExtrudeMode():void {
   }
   if(mode==="cut"&&doc.features.length&&!thru.checked){
     const [lo,hi]=throughAllBounds();
-    input("extrude-z").value=String(lo);
-    input("extrude-depth").value=String(hi-lo);
+    const remembered=prefs.rememberSurfaces?lastSurfaceZ:null;
+    if(remembered!==null&&remembered>=lo&&remembered<=hi){
+      input("extrude-z").value=String(remembered);
+      input("extrude-depth").value=String(
+        remembered>lo?lo-remembered:hi-remembered);
+    }else{
+      input("extrude-z").value=String(lo);
+      input("extrude-depth").value=String(hi-lo);
+    }
     thru.checked=true;
   }
   canvas.setExtrudeHandle({id:extrudeTarget,depth:Number(input("extrude-depth").value)||8});
@@ -649,7 +694,10 @@ function openExtrude(id?:string,operation?:"add"|"cut",at?:Point2):void {
   byId("extrude-target").textContent=ids.length>1?
     ids.length+" profiles selected":targets[0].kind+" · "+ids[0].slice(0,12);
   select("extrude-mode").value=operation||"auto";
-  input("extrude-z").value="0";
+  const remembered=prefs.rememberSurfaces&&lastSurfaceZ!==null&&
+    doc.features.some(f=>Math.abs(f.z-lastSurfaceZ!)<.001||
+      Math.abs(f.z+f.depth-lastSurfaceZ!)<.001)?lastSurfaceZ:0;
+  input("extrude-z").value=String(remembered);
   input("extrude-depth").value="8";
   input("extrude-through").checked=false;
   input("extrude-preview").checked=previewEnabled;
@@ -683,6 +731,7 @@ function saveProject():void{
   status("Editable native project downloaded");
 }
 function newProject():void {
+  lastSurfaceZ=null;
   selectedId=null;closeExtrude();
   change({schemaVersion:2,name:"Untitled part",units:"mm",profiles:[],features:[]});
   setTool("select");
@@ -690,7 +739,7 @@ function newProject():void {
 async function openProject(file:File):Promise<void>{
   if(file.size>2_000_000)throw new Error("Project exceeds 2 MB");
   const loaded=validateDocument(JSON.parse(await file.text()));
-  doc=loaded;history=[doc];historyIndex=0;selectedId=null;
+  doc=loaded;history=[doc];historyIndex=0;selectedId=null;lastSurfaceZ=null;
   persistDocument();closeExtrude();render();rebuild();
   status("Project loaded · "+doc.profiles.length+" profiles");
 }
