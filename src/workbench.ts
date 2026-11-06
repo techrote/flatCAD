@@ -210,7 +210,7 @@ function setTool(tool:SketchTool):void{
     tool==="extrude"?"Extrude / Cut":tool==="line"?"Line / Polyline":
     tool.charAt(0).toUpperCase()+tool.slice(1);
   const hint:Record<SketchTool,string>={
-    select:"Drag shapes to move · drag square handles to edit · E to extrude",
+    select:"Click to select · Ctrl+click to add/remove · drag to move · E to extrude",
     line:"Click vertices · click first point to close · Enter for open line",
     rectangle:"Drag corner to corner · hold Shift for a square",
     centerRectangle:"Drag outward from centre · hold Shift for a square",
@@ -590,6 +590,7 @@ function openExtrude(id?:string,operation?:"add"|"cut",_at?:Point2):void {
     el.classList.toggle("active",el.dataset.tool==="extrude"));
   extrudeTargets=ids;
   extrudeTarget=selectedId;
+  canvas.setSelected(selectedId,selectedIds);
   const flyout=byId("extrude-flyout");
   flyout.hidden=false;
   byId("extrude-target").textContent=ids.length>1?
@@ -805,12 +806,17 @@ button("cancel-extrude").onclick=closeExtrude;
 button("dismiss-extrude").onclick=closeExtrude;
 button("apply-extrude").onclick=applyExtrude;
 select("extrude-mode").addEventListener("change",updateExtrudeMode);
+input("extrude-preview").onchange=()=>{
+  previewEnabled=input("extrude-preview").checked;
+  scheduleOperationPreview();
+};
 input("extrude-through").onchange=()=>{
   if(input("extrude-through").checked){
     const [min,max]=throughAllBounds();
     input("extrude-z").value=String(min);input("extrude-depth").value=String(max-min);
   }
   canvas.setExtrudeHandle({id:extrudeTarget||"",depth:Number(input("extrude-depth").value)||8});
+  scheduleOperationPreview();
 };
 input("extrude-depth").oninput=()=>{
   if(!extrudeTarget)return;
@@ -820,8 +826,12 @@ input("extrude-depth").oninput=()=>{
     input("extrude-z").value=String(lastStats.boundsMm[1][2]-depth);
   }
   canvas.setExtrudeHandle({id:extrudeTarget,depth:depth||8});
+  scheduleOperationPreview();
 };
-input("extrude-z").oninput=()=>{input("extrude-through").checked=false;};
+input("extrude-z").oninput=()=>{
+  input("extrude-through").checked=false;
+  scheduleOperationPreview();
+};
 button("undo").onclick=()=>undoRedo(historyIndex-1);
 button("redo").onclick=()=>undoRedo(historyIndex+1);
 input("document-name").onchange=()=>safe(()=>change(validateDocument({...doc,name:input("document-name").value.trim()})));
