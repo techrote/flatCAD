@@ -123,3 +123,17 @@ All presets reserve left-click to pick rather than rotate. A normal scroll wheel
 Fusion: middle mouse drag pans; Shift+middle mouse drag orbits; right mouse drag orbits; wheel zooms. The earlier input mapping only *reported* orbit on Shift+middle drag. Three.js OrbitControls r180 reverses mouse ROTATE/PAN when Ctrl/Meta/Shift is held; the new adapter counter-swaps mouse bindings in a capture-phase pointerdown listener. This is applied consistently for all supported CAD navigation presets.
 
 Acceptance requires measuring actual changes to the camera-target translation and camera-to-target offset (not merely a reported action string). Right-click short-press remains reserved for later context-menu work under UX-FACE-002; right-drag must not trigger that menu.
+
+## Viewport grid isolation and click-toggle geometry (2026-11-06)
+
+**Grid and "sinking" defect:** The old Solid presentation used an infinitely broad GridHelper drawn through Z=0, which could intersect the visible solid (especially negative-depth extrusion) and make it appear submerged or cut by grid lines. The updated **display-only** reference grid sits strictly below the minimum displayed Z (including a preview cutting tool's overshoot), with a proportional bounded gap. Sketch geometry stays on the fixed XY plane and retains exact physical Z. No B-rep coordinates or feature elevations move with the grid. It is a view affordance, not another model workplane.
+
+**Two equivalent shape gestures:**
+- Click then drag to the required dimension and release. Commit immediately when the shape is valid.
+- Click and release at zero dimensions. The first click now anchors a pending primitive, with continuous rubber-band preview. The next click supplies the size or secondary datum and commits the same shape; subsequent clicks are not a third drawing mode. Escape cancels without adding geometry.
+- This applies to corner and centre rectangles, circles, regular polygons, and slots. The existing polyline vertex-click sequence is unchanged. Shift makes rectangles square in either path, including the second click; geometry snapping remains in physical millimetres.
+- A zero width/height or circle radius, or an identical slot endpoint, does not create a native CAD object or a history item.
+
+**Sketch background:** The canvas is explicitly nondraggable as a browser element (dragstart/selectstart prevented). Blank left-drag in Select mode cannot move the viewport. Middle-drag continues to pan, and an intentionally chosen Pan tool remains a visible alternative, with clearly separate input mode. Never treat a plain background drag as a selection of the grid.
+
+**Acceptance:** real browser tests for no background pan in Select, explicit middle pan, click–click rectangle/centre square/circle/polygon/slot, invalid first release, Escape cancel, and visual grid Z below both negative solids and cutting-tool overshoot. The screenshot issue is visual presentation; never "fix" it by changing OCC geometry.

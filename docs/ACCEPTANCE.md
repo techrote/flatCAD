@@ -54,3 +54,9 @@ Automated tests must verify additive/toggle Ctrl-click selection, one-history-ac
 3. Face-pick: with Start Z focused, click a committed horizontal top face and get the exact plane Z (e.g. 8). With Depth focused, click a committed face at Z 2 while Start Z 8 and obtain −6 without rewriting Start Z. Ignore sloped surfaces and provisional preview shapes; use feature-plane source values rather than float32 raycast Z as authoritative.
 4. Navigation: Fusion default middle pan and Shift+middle orbit; separately validate SOLIDWORKS, Onshape and Blender mouse schemes, settings persistence and old JSON imports. Left-click remains available for picking faces.
 5. These additions are CAD prototype acceptance only; full STEP import/round-trip and human manufacturing qualification are separate.
+
+## FlatCAD sketch click-release and visual grid regression
+
+- On a nonzero valid drag, shape is created once on mouse release. On a zero-size release, **no** invalid profile is committed, a pending first datum is shown and a second click commits the primitive. Test corner and centre rectangles, circle, polygon and slot; Shift on second click constrains square. Esc and tool changes cancel.
+- The sketch Canvas element must not be draggable by the browser. A blank background left-drag in Select mode must leave the pan transform unchanged; explicit middle button or selected Pan tool can move the viewport. Verify click-capture and button-release events after a cancelled gesture.
+- Solid reference grid is below the lowest displayed solid Z, including below-zero extrusions and any translucent red cut-tool overshoot. Visual grid positioning must not mutate the native project, B-rep bounds, physical XY plane or saved feature history.

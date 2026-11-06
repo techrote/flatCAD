@@ -66,3 +66,11 @@ Geometric constraint solving, standalone arcs, automatic region extraction from 
 ## Licensing
 
 The project's own license has **not yet been selected**; publication does not grant a license. Third-party dependencies have their own license obligations (including LGPL-2.1-only OpenCascade WASM); see the dependency record.
+
+## Click–click sketch authoring (post-M1 candidate)
+
+For rectangle, centre rectangle, circle, polygon and slot, you may **click once** to anchor the first point, then move the cursor to preview and **click again** to establish dimensions or the secondary datum. Click-and-drag remains supported. If a press/release gives a degenerate zero-size shape (including one collapsed axis), the first point is retained instead of silently discarded. Hold Shift on the second click for a square rectangle; Esc cancels.
+
+The sketch background is not an HTML draggable object. Ordinary left-drag on a blank area in Select mode neither creates geometry nor moves the grid. Use explicit Pan tool or middle-drag for viewport navigation.
+
+The 3D reference grid is purely visual and is placed below the lowest displayed model/cutting-tool geometry to prevent apparent sinking through the grid. This never changes the authoritative XY sketch plane or saved CAD coordinates.
