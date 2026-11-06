@@ -46,6 +46,7 @@ export class SketchCanvas {
   private highlightedSnap:Point2|null=null;
   private extrude:{id:string,depth:number}|null=null;
   private slotRadius=3;
+  private lastPointer:Point2|null=null;
 
   constructor(
     private readonly canvas:HTMLCanvasElement,
@@ -87,6 +88,7 @@ export class SketchCanvas {
     return profile?this.toScreen(centre(profile)):null;
   }
   getExtrudeArrowScreen():Point2|null{return this.arrowScreen();}
+  getLastPointerScreen():Point2|null{return this.lastPointer?{...this.lastPointer}:null;}
   getSelectionBounds():{left:number;top:number;right:number;bottom:number}|null{
     const pts=this.doc.profiles.filter(p=>this.selectedIds.includes(p.id))
       .flatMap(p=>outline(p).map(point=>this.toScreen(point)));
@@ -182,11 +184,15 @@ export class SketchCanvas {
   private arrowScreen():Point2|null {
     if(!this.extrude||this.selected!==this.extrude.id)return null;
     const anchor=this.getSelectedPoint();
-    return anchor?{x:anchor.x+22,y:anchor.y-Math.max(35,Math.min(130,this.extrude.depth*this.zoom))}:null;
+    if(!anchor)return null;
+    const direction=Math.sign(this.extrude.depth)||1;
+    const distancePx=Math.max(35,Math.min(130,Math.abs(this.extrude.depth)*this.zoom));
+    return {x:anchor.x+22,y:anchor.y-direction*distancePx};
   }
   private pointerDown(event:PointerEvent):void {
     if(event.button!==0&&event.button!==1)return;
     const point=this.screen(event);
+    this.lastPointer=point;
     if(this.tool==="pan"||event.button===1){
       this.gesture={kind:"pan",from:point,origin:{x:this.panX,y:this.panY}};
     }else if(this.extrude&&this.arrowScreen()&&distance(point,this.arrowScreen()!)<=16){
@@ -243,6 +249,7 @@ export class SketchCanvas {
   }
   private pointerMove(event:PointerEvent):void {
     const screen=this.screen(event);
+    this.lastPointer=screen;
     if(this.tool==="line"&&this.linePoints.length)
       this.lineCursor=this.maybeSnap(this.world(screen),event);
     if(!this.gesture){
@@ -255,7 +262,8 @@ export class SketchCanvas {
       this.panX=g.origin.x+screen.x-g.from.x;this.panY=g.origin.y+screen.y-g.from.y;
     }else if(g.kind==="depth"){
       const delta=(g.startY-screen.y)/this.zoom;
-      const depth=Math.max(.1,Math.round((g.startDepth+delta)*10)/10);
+      const target=Math.round((g.startDepth+delta)*10)/10;
+      const depth=Math.abs(target)<.1?(target<0?-.1:.1):target;
       if(this.extrude)this.extrude={...this.extrude,depth};
       this.events.onExtrudeDepth(depth);
     }else{
@@ -424,14 +432,15 @@ export class SketchCanvas {
     const ctx=this.ctx;
     ctx.strokeStyle="#f6ba66";ctx.lineWidth=3;ctx.beginPath();
     ctx.moveTo(anchor.x+22,anchor.y);ctx.lineTo(end.x,end.y);ctx.stroke();
-    // Filled upward arrowhead instead of a circular draggable end cap.
+    // Signed extrusion shows arrowheads pointing along the positive or negative Z direction.
     ctx.fillStyle="#f6ba66";
+    const direction=this.extrude.depth<0?-1:1;
     ctx.beginPath();
-    ctx.moveTo(end.x,end.y-13);
-    ctx.lineTo(end.x-11,end.y+10);
-    ctx.lineTo(end.x-4,end.y+7);
-    ctx.lineTo(end.x+4,end.y+7);
-    ctx.lineTo(end.x+11,end.y+10);
+    ctx.moveTo(end.x,end.y-13*direction);
+    ctx.lineTo(end.x-11,end.y+10*direction);
+    ctx.lineTo(end.x-4,end.y+7*direction);
+    ctx.lineTo(end.x+4,end.y+7*direction);
+    ctx.lineTo(end.x+11,end.y+10*direction);
     ctx.closePath();ctx.fill();
     ctx.textAlign="left";ctx.fillStyle="#ffd6a1";ctx.font="12px ui-monospace,monospace";
     ctx.fillText("↕ "+fmt(this.extrude.depth)+" mm",end.x+16,end.y+4);

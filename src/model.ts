@@ -7,6 +7,7 @@ export type PolygonProfile = { id:string; kind:"polygon"; x:number; y:number; ra
 export type PathProfile = { id:string; kind:"path"; points:Point2[]; closed:boolean };
 export type SlotProfile = { id:string; kind:"slot"; x1:number; y1:number; x2:number; y2:number; radius:number };
 export type Profile = Rectangle | Circle | PolygonProfile | PathProfile | SlotProfile;
+/** z is the start plane in mm; signed depth is the Z displacement to the end plane. */
 export type Feature = { id:string; profileId:string; operation:"add"|"cut"; z:number; depth:number };
 export type CadDocument = { schemaVersion:2; name:string; units:"mm"; profiles:Profile[]; features:Feature[] };
 
@@ -90,7 +91,9 @@ export function validateDocument(input: unknown): CadDocument {
     failUnless(typeof f.profileId === "string" && profileIds.has(f.profileId), "missing referenced profile");
     failUnless(f.operation === "add" || f.operation === "cut", "unsupported feature operation");
     failUnless(index !== 0 || f.operation === "add", "first feature must add material");
-    failUnless(coordinate(f.z) && positive(f.depth) && Math.abs(f.z + f.depth) <= LIMIT, "invalid feature Z/depth");
+    failUnless(coordinate(f.z) && coordinate(f.depth) && f.depth !== 0 &&
+      Math.abs(f.depth)<=LIMIT && Math.abs(f.z + f.depth) <= LIMIT,
+      "invalid feature Z/depth (must be non-zero, signed and finite)");
     return { id: f.id, profileId: f.profileId, operation: f.operation, z: f.z, depth: f.depth };
   });
   return { schemaVersion: 2, name: input.name, units: "mm", profiles, features };

@@ -22,7 +22,8 @@ describe("schema v1 validation", () => {
     ["duplicate IDs", (x: any) => x.profiles[1].id = "plate"],
     ["missing referenced profile", (x: any) => x.features[1].profileId = "missing"],
     ["cut-first history", (x: any) => x.features[0].operation = "cut"],
-    ["negative depth", (x: any) => x.features[0].depth = -8],
+    ["zero depth", (x: any) => x.features[0].depth = 0],
+    ["non-finite depth", (x: any) => x.features[0].depth = Infinity],
     ["unsupported profile", (x: any) => x.profiles[0].kind = "polygon"],
   ])("rejects %s", (_name, mutate) => {
     const doc = copy();
@@ -76,5 +77,20 @@ describe("extended authoring schema",()=>{
     expect(()=>validateDocument({schemaVersion:2,name:"Broken",units:"mm",
       profiles:[{id:"l",kind:"path",points:[{x:0,y:0},{x:5,y:5},{x:0,y:5},{x:5,y:0}],closed:true}],
       features:[]})).toThrow("invalid closed polygon path");
+  });
+});
+
+describe("signed feature depth and document compatibility",()=>{
+  it("stores opposite-direction cut without losing signed depth",()=>{
+    const p=validateDocument({...DEMO,features:[...DEMO.features,
+      {id:"reverseCut",profileId:"hole_l",operation:"cut",z:8,depth:-6}]});
+    expect(p.features.at(-1)).toEqual({
+      id:"reverseCut",profileId:"hole_l",operation:"cut",z:8,depth:-6
+    });
+    expect(validateDocument(JSON.parse(JSON.stringify(p)))).toEqual(p);
+  });
+  it("loads positive v1/v2 features unchanged",()=>{
+    expect(validateDocument({...DEMO,schemaVersion:1}).features).toEqual(DEMO.features);
+    expect(validateDocument(DEMO).features[0].depth).toBe(8);
   });
 });

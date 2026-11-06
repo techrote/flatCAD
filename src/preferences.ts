@@ -1,4 +1,5 @@
 /** User preferences are intentionally separate from the engineering CAD document. */
+import { validNavigationPreset, type NavigationPreset } from "./navigation";
 export type ShortcutAction =
   | "tool.select" | "tool.line" | "tool.rectangle" | "tool.centerRectangle"
   | "tool.circle" | "tool.polygon" | "tool.slot" | "tool.pan"
@@ -27,6 +28,7 @@ export type Preferences={
   shortcuts:Record<ShortcutAction,string>;
   grid:{tiers:[GridTier,GridTier,GridTier],snapGeometry:boolean};
   polygon:{sides:number,rotation:number};
+  navigation: NavigationPreset;
 };
 const defaultLayers: [GridTier,GridTier,GridTier]=[
   {label:"Fine",enabled:true,spacing:1,color:"#1b3045",snap:false},
@@ -36,7 +38,7 @@ const defaultLayers: [GridTier,GridTier,GridTier]=[
 export function defaultPreferences():Preferences {
   return {version:1,shortcuts:{...DEFAULT_SHORTCUTS},
     grid:{tiers:defaultLayers.map(x=>({...x})) as [GridTier,GridTier,GridTier],snapGeometry:true},
-    polygon:{sides:6,rotation:-90}};
+    polygon:{sides:6,rotation:-90},navigation:"fusion"};
 }
 const codes=/^(?:(?:Control|Alt|Shift|Meta)\+)*(?:Key[A-Z]|Digit[0-9]|Arrow(?:Up|Down|Left|Right)|Space|Escape|Delete|Backspace|Enter|Tab|F(?:[1-9]|1[0-2]))$/;
 const allowedActions=Object.keys(ACTION_LABELS) as ShortcutAction[];
@@ -86,8 +88,10 @@ export function validatePreferences(source:unknown):Preferences {
     (source.polygon.sides as number)<3||(source.polygon.sides as number)>64||
     typeof source.polygon.rotation!=="number"||!Number.isFinite(source.polygon.rotation)||
     Math.abs(source.polygon.rotation)>36000)throw new Error("Invalid polygon defaults");
+  const navigation=source.navigation===undefined?"fusion":source.navigation;
+  if(!validNavigationPreset(navigation))throw new Error("Unknown CAD navigation preset");
   return {version:1,shortcuts,grid:{tiers,snapGeometry:source.grid.snapGeometry},
-    polygon:{sides:source.polygon.sides as number,rotation:source.polygon.rotation}};
+    polygon:{sides:source.polygon.sides as number,rotation:source.polygon.rotation},navigation};
 }
 export const PREFS_KEY="flatcad.preferences.v1";
 export function loadPreferences():Preferences {
