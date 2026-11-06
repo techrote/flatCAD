@@ -3,6 +3,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { GeometryMesh } from "./kernel-protocol";
 import { dragAction, orbitControlsBinding, type NavigationPreset } from "./navigation";
 import { exactFaceElevation } from "./signed-extrusion";
+import type { SurfaceTarget } from "./surface-interaction";
 
 /** OpenCascade B-rep-derived display; face picking references COMMITTED geometry only. */
 export class Preview {
@@ -14,6 +15,11 @@ export class Preview {
   private readonly raycaster = new THREE.Raycaster();
   private readonly pickPoint = new THREE.Vector2();
   private object: THREE.Group | null = null;
+  private hoveredHighlight: THREE.Mesh | null = null;
+  private hoveredKey = "";
+  private lastHovered: SurfaceTarget | null = null;
+  private onSurfaceHover: ((target:SurfaceTarget|null, pointer:{x:number,y:number})=>void)|null=null;
+  private onSurfaceMenu: ((target:SurfaceTarget|null,pointer:{x:number,y:number})=>void)|null=null;
   private committedPickMesh: THREE.Mesh | null = null;
   private allowedElevations: number[] = [];
   private navigation: NavigationPreset = "fusion";
@@ -70,11 +76,32 @@ export class Preview {
         this.container.dataset.cameraOffset=this.camera.position.clone().sub(this.orbit.target).toArray().join(",");
         return;
       }
-      // Left mouse click picks a committed horizontal B-rep face if a numeric
-      // extrusion field is armed. Orbit, pan and right click never pick faces.
-      if(event.button===0&&this.onFacePicked)this.onFacePicked(this.pickHorizontalFace(event));
+      // Short left click latches the armed numeric field. Short right click
+      // requests a context menu. Drags are exclusively navigation gestures.
+      if(event.button===0&&this.onFacePicked)
+        this.onFacePicked(this.pickTarget(event)?.z??null);
+      if(event.button===2&&this.onSurfaceMenu)
+        this.onSurfaceMenu(this.pickTarget(event)?.target??null,
+          {x:event.clientX,y:event.clientY});
     });
     surface.addEventListener("pointercancel",()=>{this.pointerDown=null;});
+    surface.addEventListener("pointermove",event=>{
+      // Do not attribute transient triangle highlights while navigating.
+      if(event.buttons!==0){
+        this.clearHighlight();
+        this.onSurfaceHover?.(null,{x:event.clientX,y:event.clientY});
+        return;
+      }
+      const hit=this.pickTarget(event);
+      this.showHighlight(hit);
+      this.lastHovered=hit?.target??null;
+      this.onSurfaceHover?.(this.lastHovered,{x:event.clientX,y:event.clientY});
+    });
+    surface.addEventListener("pointerleave",()=>{
+      this.clearHighlight();
+      this.lastHovered=null;
+      this.onSurfaceHover?.(null,{x:0,y:0});
+    });
     surface.addEventListener("auxclick",e=>{if(e.button===1)e.preventDefault();});
     surface.addEventListener("contextmenu",e=>e.preventDefault());
 
@@ -113,12 +140,19 @@ export class Preview {
     this.orbit.mouseButtons.RIGHT=this.toMouseAction(dragAction(preset,2,{shift:false,ctrl:false}));
   }
   setFacePickHandler(handler:((z:number|null)=>void)|null):void{this.onFacePicked=handler;}
+  setSurfaceHoverHandler(handler:((target:SurfaceTarget|null,pointer:{x:number,y:number})=>void)|null):void{
+    this.onSurfaceHover=handler;
+  }
+  setSurfaceMenuHandler(handler:((target:SurfaceTarget|null,pointer:{x:number,y:number})=>void)|null):void{
+    this.onSurfaceMenu=handler;
+  }
   setFaceElevations(heights:readonly number[]):void {
     this.allowedElevations=heights.filter(Number.isFinite);
   }
 
   /** Keep the raycast mesh independent from the coloured provisional result. */
   setCommittedPickMesh(mesh:GeometryMesh|null):void {
+    this.clearHighlight();
     if(this.committedPickMesh){
       this.committedPickMesh.geometry.dispose();
       (this.committedPickMesh.material as THREE.Material).dispose();
@@ -129,29 +163,120 @@ export class Preview {
     this.committedPickMesh=new THREE.Mesh(geometry,new THREE.MeshBasicMaterial({side:THREE.DoubleSide}));
     this.committedPickMesh.updateMatrixWorld(true);
   }
-  private pickHorizontalFace(event:PointerEvent):number|null {
-    const target=this.committedPickMesh;
-    if(!target||!this.allowedElevations.length)return null;
-    const rect=this.renderer.domElement.getBoundingClientRect();
-    if(rect.width<=0||rect.height<=0)return null;
-    this.pickPoint.set(
-      2*(event.clientX-rect.left)/rect.width-1,
-      1-2*(event.clientY-rect.top)/rect.height
-    );
+  /** Raycast the COMMITTED B-rep-derived surface, never the provisional tool. */
+  private pickTarget(event:PointerEvent):{target:SurfaceTarget,faceIndex:number,normal:THREE.Vector3,point:THREE.Vector3}|null {
+    const pick=this.committedPickMesh;
+    if(!pick)return null;
+    const bounds=this.renderer.domElement.getBoundingClientRect();
+    if(bounds.width<=0||bounds.height<=0)return null;
+    this.pickPoint.set(2*(event.clientX-bounds.left)/bounds.width-1,
+      1-2*(event.clientY-bounds.top)/bounds.height);
     this.camera.updateMatrixWorld(true);
     this.raycaster.setFromCamera(this.pickPoint,this.camera);
-    const hits=this.raycaster.intersectObject(target,false);
-    const coordinates=target.geometry.getAttribute("position");
+    const positions=pick.geometry.getAttribute("position");
+    const hits=this.raycaster.intersectObject(pick,false);
     for(const hit of hits){
-      if(!hit.face||Math.abs(hit.face.normal.z)<0.995)continue;
-      const z1=coordinates.getZ(hit.face.a),z2=coordinates.getZ(hit.face.b),z3=coordinates.getZ(hit.face.c);
-      // Planar horizontal triangles only; reject cylindrical sides and
-      // sloping surfaces even if clicked triangle has a near-horizontal normal.
-      if(Math.max(z1,z2,z3)-Math.min(z1,z2,z3)>0.001)continue;
-      const exact=exactFaceElevation((z1+z2+z3)/3,this.allowedElevations,0.002);
-      if(exact!==null)return exact;
+      if(!hit.face||hit.faceIndex===undefined)return null;
+      const triangle=hit.face;
+      const v=[
+        new THREE.Vector3().fromBufferAttribute(positions,triangle.a),
+        new THREE.Vector3().fromBufferAttribute(positions,triangle.b),
+        new THREE.Vector3().fromBufferAttribute(positions,triangle.c)
+      ];
+      // Each mesh triangle is only a display approximation. A "face Z" is
+      // accepted ONLY if it matches a horizontal, source-authorized plane.
+      let z:number|null=null,kind:"face"|"vertex"="face";
+      const flat=Math.max(...v.map(p=>p.z))-Math.min(...v.map(p=>p.z))<.002;
+      if(flat&&Math.abs(triangle.normal.z)>.995)
+        z=exactFaceElevation(v[0].z,this.allowedElevations,.002);
+      const px=event.clientX-bounds.left,py=event.clientY-bounds.top;
+      const near=v.map(vertex=>{
+        const projected=vertex.clone().project(this.camera);
+        return Math.hypot((projected.x+1)*bounds.width/2-px,
+          (1-projected.y)*bounds.height/2-py);
+      });
+      const nearIndex=near.indexOf(Math.min(...near));
+      if(near[nearIndex]<=8){
+        const vertex=v[nearIndex];
+        const exact=exactFaceElevation(vertex.z,this.allowedElevations,.002);
+        if(exact!==null){kind="vertex";z=exact;}
+      }
+      const target:SurfaceTarget={kind,
+        point:[hit.point.x,hit.point.y,hit.point.z],
+        z,normal:[triangle.normal.x,triangle.normal.y,triangle.normal.z]};
+      return {target,faceIndex:hit.faceIndex,normal:triangle.normal.clone().normalize(),
+        point:hit.point.clone()};
     }
     return null;
+  }
+  /** Highlight a co-planar surface patch, not the whole object. Curved facets
+   *  highlight the selected tessellated patch; exact topology is untouched. */
+  private showHighlight(hit:{target:SurfaceTarget,faceIndex:number,normal:THREE.Vector3,point:THREE.Vector3}|null):void{
+    if(!hit||!this.committedPickMesh){this.clearHighlight();return;}
+    const n=hit.normal;
+    const distance=n.dot(hit.point);
+    const key=[
+      Math.round(n.x*100),Math.round(n.y*100),Math.round(n.z*100),
+      Math.round(distance*1000)
+    ].join("/");
+    if(key===this.hoveredKey&&this.hoveredHighlight)return;
+    this.clearHighlight();
+    const geo=this.committedPickMesh.geometry;
+    const attr=geo.getAttribute("position"),idx=geo.getIndex();
+    if(!idx)return;
+    const vertices:number[]=[],indices:number[]=[];
+    const p=new THREE.Vector3(),q=new THREE.Vector3(),r=new THREE.Vector3();
+    const normal=new THREE.Vector3();
+    const triangles=idx.count/3;
+    for(let i=0;i<triangles;i++){
+      const ia=idx.getX(3*i),ib=idx.getX(3*i+1),ic=idx.getX(3*i+2);
+      p.fromBufferAttribute(attr,ia);
+      q.fromBufferAttribute(attr,ib);
+      r.fromBufferAttribute(attr,ic);
+      normal.copy(q).sub(p).cross(new THREE.Vector3().copy(r).sub(p)).normalize();
+      if(Math.abs(normal.dot(n))<.99)continue;
+      if(Math.abs(n.dot(p)-distance)>.003||
+         Math.abs(n.dot(q)-distance)>.003||
+         Math.abs(n.dot(r)-distance)>.003)continue;
+      const offset=vertices.length/3;
+      vertices.push(p.x,p.y,p.z,q.x,q.y,q.z,r.x,r.y,r.z);
+      indices.push(offset,offset+1,offset+2);
+    }
+    // Degenerate or curved surfaces still show the raycast triangle itself.
+    if(!indices.length){
+      const i=hit.faceIndex,ia=idx.getX(3*i),ib=idx.getX(3*i+1),ic=idx.getX(3*i+2);
+      for(const id of [ia,ib,ic]){
+        p.fromBufferAttribute(attr,id);vertices.push(p.x,p.y,p.z);
+      }
+      indices.push(0,1,2);
+    }
+    const highlightGeo=new THREE.BufferGeometry();
+    highlightGeo.setAttribute("position",new THREE.Float32BufferAttribute(vertices,3));
+    highlightGeo.setIndex(indices);
+    this.hoveredHighlight=new THREE.Mesh(highlightGeo,new THREE.MeshBasicMaterial({
+      color:hit.target.z!==null?0x9ce6ff:0xffd17a,
+      transparent:true,opacity:.38,side:THREE.DoubleSide,
+      depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2
+    }));
+    this.hoveredHighlight.renderOrder=10;
+    this.scene.add(this.hoveredHighlight);
+    this.hoveredKey=key;
+    this.container.dataset.hoveredTargetKind=hit.target.kind;
+    if(hit.target.z!==null)this.container.dataset.hoveredFaceZ=String(hit.target.z);
+    else delete this.container.dataset.hoveredFaceZ;
+    this.container.dataset.highlightTriangleCount=String(indices.length/3);
+  }
+  private clearHighlight():void{
+    if(this.hoveredHighlight){
+      this.scene.remove(this.hoveredHighlight);
+      this.hoveredHighlight.geometry.dispose();
+      (this.hoveredHighlight.material as THREE.Material).dispose();
+      this.hoveredHighlight=null;
+    }
+    this.hoveredKey="";
+    delete this.container.dataset.hoveredFaceZ;
+    delete this.container.dataset.hoveredTargetKind;
+    delete this.container.dataset.highlightTriangleCount;
   }
 
   private resize(): void {
@@ -177,7 +302,9 @@ export class Preview {
     return geometry;
   }
 
-  setMesh(mesh: GeometryMesh | null, options: { pending?: "add" | "cut"; preserveCamera?: boolean } = {}): void {
+  setMesh(mesh: GeometryMesh | null, options: {
+    pending?: "add" | "cut"; preserveCamera?: boolean; cutTool?:GeometryMesh|null
+  } = {}): void {
     if(!options.pending)this.setCommittedPickMesh(mesh);
     if (this.object) {
       this.scene.remove(this.object);
@@ -196,6 +323,16 @@ export class Preview {
       color: options.pending === "add" ? 0x73d1b8 : options.pending === "cut" ? 0xf2af7d : 0x6aacf4,
       metalness: 0.2, roughness: 0.58, side: THREE.DoubleSide
     })));
+    if(options.pending==="cut" && options.cutTool && options.cutTool.triangles.length){
+      const tool=new THREE.Mesh(this.makeGeometry(options.cutTool),new THREE.MeshBasicMaterial({
+        color:0xe6304c,transparent:true,opacity:.25,side:THREE.DoubleSide,
+        depthWrite:false,depthTest:false,polygonOffset:true,polygonOffsetFactor:-1
+      }));
+      tool.name="Full cutting tool including overshoot";
+      tool.renderOrder=7;
+      group.add(tool);
+      this.container.dataset.cutToolVisible="true";
+    }else delete this.container.dataset.cutToolVisible;
     if (mesh.edgeLines.length) {
       const lines = new THREE.BufferGeometry();
       lines.setAttribute("position", new THREE.Float32BufferAttribute(mesh.edgeLines, 3));
@@ -226,7 +363,11 @@ export class Preview {
     this.resizeObserver.disconnect();
     this.orbit.dispose();
     this.onFacePicked=null;
+    this.onSurfaceHover=null;
+    this.onSurfaceMenu=null;
+    this.clearHighlight();
     this.setMesh(null);
+    this.setCommittedPickMesh(null);
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
