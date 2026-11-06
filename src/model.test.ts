@@ -11,9 +11,10 @@ describe("schema v1 validation", () => {
     expect(doc.profiles).toHaveLength(3);
     expect(doc.features.map(f => f.operation)).toEqual(["add", "cut", "cut"]);
     expect(doc.units).toBe("mm");
+    expect(doc.schemaVersion).toBe(2);
   });
   it.each([
-    ["wrong version", (x: any) => x.schemaVersion = 2],
+    ["wrong version", (x: any) => x.schemaVersion = 99],
     ["wrong units", (x: any) => x.units = "inch"],
     ["non-finite width", (x: any) => x.profiles[0].width = Infinity],
     ["zero width", (x: any) => x.profiles[0].width = 0],
@@ -46,5 +47,34 @@ describe("schema v1 validation", () => {
     expect(() => appendFeature(doc, {
       id: "cut", profileId: "hole_l", operation: "cut", z: 0, depth: 10
     })).toThrow("first feature");
+  });
+});
+
+describe("extended authoring schema",()=>{
+  it("migrates old native v1 documents to v2 without geometry loss",()=>{
+    const migrated=validateDocument({...DEMO,schemaVersion:1});
+    expect(migrated.schemaVersion).toBe(2);
+    expect(migrated.features).toEqual(DEMO.features);
+  });
+  it("accepts editable regular polygons, slots and closed paths",()=>{
+    const profiles=[
+      {id:"p",kind:"polygon",x:0,y:0,radius:10,sides:6,rotation:30},
+      {id:"s",kind:"slot",x1:0,y1:0,x2:20,y2:0,radius:3},
+      {id:"line",kind:"path",points:[{x:0,y:0},{x:10,y:0},{x:10,y:10}],closed:true}
+    ];
+    const doc=validateDocument({schemaVersion:2,name:"New",units:"mm",profiles,
+      features:[{id:"f",profileId:"p",operation:"add",z:0,depth:8}]});
+    expect(doc.profiles).toHaveLength(3);
+  });
+  it("rejects extrusions of open geometry",()=>{
+    const input={schemaVersion:2,name:"Open",units:"mm",
+      profiles:[{id:"l",kind:"path",points:[{x:0,y:0},{x:2,y:2}],closed:false}],
+      features:[{id:"x",profileId:"l",operation:"add",z:0,depth:8}]};
+    expect(()=>validateDocument(input)).toThrow("missing referenced profile");
+  });
+  it("rejects intersecting or degenerate closed profiles",()=>{
+    expect(()=>validateDocument({schemaVersion:2,name:"Broken",units:"mm",
+      profiles:[{id:"l",kind:"path",points:[{x:0,y:0},{x:5,y:5},{x:0,y:5},{x:5,y:0}],closed:true}],
+      features:[]})).toThrow("invalid closed polygon path");
   });
 });
