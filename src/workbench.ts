@@ -464,6 +464,7 @@ function restoreCommittedPreview():void {
   preview?.setMesh(committedBuild?.mesh??null,{preserveCamera:true});
 }
 function closeExtrude():void {
+  extrudeCursor=null;
   ++previewToken;
   clearTimeout(previewTimer);
   extrudeTarget=null;
@@ -490,21 +491,52 @@ function positionExtrudeMenu():void {
   const flyout=byId("extrude-flyout");
   if(flyout.hidden)return;
   const viewport=canvas.getViewport();
-  const fallback=canvas.getSelectedPoint()??{x:viewport.width/2,y:viewport.height/2};
-  const selection=canvas.getSelectionBounds()??{
-    left:fallback.x,top:fallback.y,right:fallback.x,bottom:fallback.y
-  };
-  const majorGridPixels=prefs.grid.tiers[2].spacing*canvas.getZoom();
+  const cursor=extrudeCursor??canvas.getSelectedPoint()??{x:viewport.width/2,y:viewport.height/2};
   const result=placeExtrudeMenu({
-    viewport,selection,
-    popup:{width:flyout.offsetWidth||258,height:flyout.offsetHeight||290},
-    arrow:canvas.getExtrudeArrowScreen(),
-    majorGridPixels
+    viewport,cursor,
+    popup:{width:flyout.offsetWidth||258,height:flyout.offsetHeight||315},
+    arrow:canvas.getExtrudeArrowScreen()
   });
   flyout.style.left=result.x+"px";
   flyout.style.top=result.y+"px";
-  flyout.dataset.placementSide=result.side;
-  flyout.dataset.majorGridPixels=String(majorGridPixels);
+  flyout.dataset.placementCorner=result.corner;
+  flyout.dataset.arrowAvoidancePx=String(result.arrowAvoidancePx);
+  delete flyout.dataset.majorGridPixels;
+  delete flyout.dataset.placementSide;
+}
+/** A face pick references the committed solid, not any pending preview mesh. */
+function fillFocusedFieldFromFace(z:number|null):void {
+  if(!extrudeTargets.length||byId("extrude-flyout").hidden)return;
+  if(z===null){
+    status("Click a flat horizontal face of the committed solid to pick its Z elevation",true);
+    return;
+  }
+  const field=input(facePickField==="z"?"extrude-z":"extrude-depth");
+  if(facePickField==="z"){
+    field.value=String(z);
+  }else{
+    const start=Number(input("extrude-z").value);
+    if(!Number.isFinite(start)){
+      status("Enter a valid Start Z before picking target Depth",true);return;
+    }
+    const signed=depthToFace(start,z);
+    if(signed===0){
+      status("Target face is level with Start Z: depth cannot be zero",true);return;
+    }
+    field.value=String(signed);
+  }
+  input("extrude-through").checked=false;
+  const depth=Number(input("extrude-depth").value);
+  if(extrudeTarget&&Number.isFinite(depth)&&depth!==0)
+    canvas.setExtrudeHandle({id:extrudeTarget,depth});
+  const host=byId("preview");
+  host.dataset.lastPickedFaceZ=String(z);
+  host.dataset.lastPickedField=facePickField;
+  status(facePickField==="z"?"Start Z set to "+z+" mm":
+    "Depth set to "+field.value+" mm (relative to Start Z)");
+  positionExtrudeMenu();
+  scheduleOperationPreview();
+  field.focus({preventScroll:true});
 }
 function previewError(error:unknown):void {
   const label=byId("extrude-preview-error");
@@ -588,7 +620,7 @@ function updateExtrudeMode():void {
   positionExtrudeMenu();
   scheduleOperationPreview();
 }
-function openExtrude(id?:string,operation?:"add"|"cut",_at?:Point2):void {
+function openExtrude(id?:string,operation?:"add"|"cut",at?:Point2):void {
   const ids = id ? (selectedIds.includes(id) ? [...selectedIds] : [id]) : [...selectedIds];
   if(!ids.length){
     setTool("extrude");status("Click a closed shape to extrude or cut");
@@ -609,6 +641,8 @@ function openExtrude(id?:string,operation?:"add"|"cut",_at?:Point2):void {
     el.classList.toggle("active",el.dataset.tool==="extrude"));
   extrudeTargets=ids;
   extrudeTarget=selectedId;
+  // Snapshot the cursor when E opens. Later Solid clicks never move the popup.
+  extrudeCursor=at??canvas.getLastPointerScreen()??canvas.getSelectedPoint();
   canvas.setSelected(selectedId,selectedIds);
   const flyout=byId("extrude-flyout");
   flyout.hidden=false;
@@ -621,6 +655,7 @@ function openExtrude(id?:string,operation?:"add"|"cut",_at?:Point2):void {
   input("extrude-preview").checked=previewEnabled;
   updateExtrudeMode();
   render();
+  facePickField="depth";
   input("extrude-depth").focus();
 }
 function applyExtrude():void {
