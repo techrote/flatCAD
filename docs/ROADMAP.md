@@ -3,7 +3,7 @@
 | Milestone | Definition | Exit gate | Status |
 |---|---|---|---|
 | M0 — kernel proof and vertical slice | local web build; editable rectangle/circle profiles; add/cut; exact STEP | fresh checkout build, real browser WASM, known volume, STEP independently reopened | **in progress** |
-| M1 — sketch editor | polylines/arcs/slots, accurate snapping, selection and drawing UX | drafting workflow tests at different zoom levels and devices | planned |
+| M1 — sketch editor | polylines/arcs/slots, accurate snapping, selection and drawing UX | drafting workflow tests at different zoom levels and devices | **in progress**: line/path, slot, polygon, centre rectangle, contextual E and 3-tier grid implemented; arcs, trim/offset and general regions incomplete |
 | M2 — constraint solver | geometric and dimensional constraints, solving diagnostics | under/fully/over-constrained examples, edit stability | planned |
 | M3 — full feature system | derived closed regions, pockets, through-all, parametric history and safe recompute | topological regression, redo/reopen and controlled error recovery | planned |
 | M4 — interoperability | STEP import/round-trip, DXF/SVG, STL, schema migrations | third-party CAD test corpus and unit conversions | planned |

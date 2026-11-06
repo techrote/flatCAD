@@ -11,3 +11,6 @@
 9. Do not introduce cloud dependencies, accounts, telemetry, external font CDNs or unreviewed network requests; local-first/offline behaviour is contractual.
 10. Clearly mark a capability as unimplemented until a real executable acceptance gate demonstrates it. Never claim manufacturing-grade accuracy from screenshots.
 11. Maintain docs/DEPENDENCIES.md and examine runtime dependency license implications before adoption.
+12. Treat docs/UX-DIRECT-INTERACTION.md as the direct-first UX contract. Every new menu action should have a canvas/shortcut path where practical, and every direct action must have a menu fallback. Menus and inspectors initiate hidden.
+13. Keep keyboard/grid preferences independent of the native CAD document. Do not silently change default user shortcuts, bind conflicting chord combinations or override browser input editing.
+14. New tools require pointer + keyboard browser test coverage, numeric schema validation and exact OpenCascade evaluation where solids are involved.

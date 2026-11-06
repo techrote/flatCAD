@@ -1,0 +1,735 @@
+import "./styles.css";
+import "./workbench.css";
+import {
+  DEMO, appendFeature, appendProfile, deleteProfile, newId, updateProfile, validateDocument,
+  type CadDocument, type Feature, type Profile, type Point2
+} from "./model";
+import { centre, isClosed, suggestOperation, translate } from "./geometry";
+import { SketchCanvas, type SketchTool } from "./sketch-canvas-v2";
+import { KernelClient } from "./kernel-client";
+import { Preview } from "./preview";
+import {
+  ACTION_LABELS, PREFS_KEY, chordFromEvent, defaultPreferences, displayShortcut,
+  loadPreferences, savePreferences, validatePreferences, validateShortcut,
+  type Preferences, type ShortcutAction
+} from "./preferences";
+
+const PROJECT_KEY="flatcad.project.v1";
+const root=document.getElementById("app");
+if(!root)throw new Error("Missing #app");
+root.innerHTML=[
+  '<div class="shell workbench">',
+  '  <header class="topbar workbench-header">',
+  '    <div class="brand"><span class="brand-icon">▣</span><div><strong>flat<span>CAD</span></strong><small>XY · 2.5D</small></div></div>',
+  '    <input id="document-name" aria-label="Project name" maxlength="128" title="Project name">',
+  '    <nav id="menus" class="menu-triggers" aria-label="Application menus">',
+  '      <button data-menu="file" class="menu-trigger">File</button>',
+  '      <button data-menu="sketch" class="menu-trigger">Sketch</button>',
+  '      <button data-menu="model" class="menu-trigger">Model</button>',
+  '      <button data-menu="view" class="menu-trigger">View</button>',
+  '      <button data-menu="settings" class="menu-trigger">Settings</button>',
+  '      <div id="menu-popover" class="menu-popover" hidden role="menu"></div>',
+  '    </nav>',
+  '    <button id="quick-extrude" class="button primary" title="Extrude or cut selected profile (E)">Extrude <kbd>E</kbd></button>',
+  '    <input type="file" id="project-input" accept=".json,.flatcad.json,application/json" hidden>',
+  '    <input type="file" id="settings-input" accept=".json,application/json" hidden>',
+  '  </header>',
+  '  <main class="workspace workbench-layout">',
+  '    <section class="panel sketch-section workbench-sketch">',
+  '      <div class="panel-head compact-head"><div class="header-label"><span class="panel-index">01</span><div><strong>Sketch</strong><small>Draw directly · XY plane</small></div></div>',
+  '        <span id="sketch-context" class="chip">Select <kbd>V</kbd></span></div>',
+  '      <div id="sketch-wrap" class="sketch-wrap">',
+  '        <canvas id="sketch" aria-label="2D CAD sketch canvas">Canvas 2D is required</canvas>',
+  '        <div class="tool-rail" role="toolbar" aria-label="Sketching tools">',
+  '          <button data-tool="select" title="Select (V)" class="rail-tool active" aria-label="Select">↖</button>',
+  '          <button data-tool="line" title="Line or polyline (L)" class="rail-tool" aria-label="Line">╱</button>',
+  '          <button data-tool="rectangle" title="Corner rectangle (R)" class="rail-tool" aria-label="Rectangle">▭</button>',
+  '          <button data-tool="centerRectangle" title="Centre rectangle (Shift+R)" class="rail-tool" aria-label="Centre rectangle">▣</button>',
+  '          <button data-tool="circle" title="Circle (C)" class="rail-tool" aria-label="Circle">◯</button>',
+  '          <button data-tool="polygon" title="Regular polygon (P)" class="rail-tool" aria-label="Polygon">⬡</button>',
+  '          <button data-tool="slot" title="Slot (S)" class="rail-tool" aria-label="Slot">⬭</button>',
+  '          <button data-tool="pan" title="Pan (M or middle mouse)" class="rail-tool" aria-label="Pan">✥</button>',
+  '          <span class="rail-divider"></span>',
+  '          <button data-tool="extrude" title="Extrude / Cut (E)" class="rail-tool" aria-label="Extrude or cut">↥</button>',
+  '        </div>',
+  '        <div id="shape-options" class="floating-tool-options" hidden></div>',
+  '        <div id="selection-bar" class="selection-bar" hidden>',
+  '          <button id="selection-extrude" title="Extrude or cut (E)">↥ Extrude</button>',
+  '          <button id="selection-duplicate" title="Duplicate (Ctrl+D)">⧉</button>',
+  '          <button id="selection-properties" title="Exact dimensions">▤</button>',
+  '          <button id="selection-delete" title="Delete selected">×</button>',
+  '        </div>',
+  '        <section id="extrude-flyout" class="extrude-flyout" aria-label="Extrude or cut" hidden>',
+  '          <div class="flyout-head"><strong>Extrude</strong><button id="cancel-extrude" aria-label="Cancel extrusion">×</button></div>',
+  '          <div id="extrude-target" class="flyout-subtitle"></div>',
+  '          <label class="field"><span>Operation</span><select id="extrude-mode"><option value="auto">Auto</option><option value="add">Add / Join</option><option value="cut">Cut</option></select></label>',
+  '          <div class="field-row"><label class="field"><span>Start Z · mm</span><input type="number" step="any" id="extrude-z" value="0"></label>',
+  '            <label class="field"><span>Depth · mm</span><input type="number" min="0.001" step="any" id="extrude-depth" value="8"></label></div>',
+  '          <label class="check through-all"><input type="checkbox" id="extrude-through"> Through all (cut)</label>',
+  '          <div class="form-actions"><button id="apply-extrude" class="button primary">Apply <kbd>Enter</kbd></button><button id="dismiss-extrude" class="button muted-button">Cancel</button></div>',
+  '          <small class="flyout-hint">Drag the amber arrow in the sketch to set depth</small>',
+  '        </section>',
+  '        <div id="canvas-hint" class="canvas-hint">Select a shape or press a drawing shortcut</div>',
+  '      </div>',
+  '      <div class="panel-footer"><button id="grid-quick" class="text-button">⊞ Grid <kbd>G</kbd></button>',
+  '        <span id="zoom" class="muted">4 px/mm</span><span id="profile-count" class="chip">3</span></div>',
+  '    </section>',
+  '    <aside class="workbench-side">',
+  '      <section class="panel preview-panel">',
+  '        <div class="panel-head compact-head"><div class="header-label"><span class="panel-index">02</span><div><strong>Solid</strong><small>Orbit · zoom · inspect</small></div></div><span class="chip">Z ↑</span></div>',
+  '        <div id="preview" class="preview-root"><span class="placeholder">Loading 3D preview…</span></div>',
+  '      </section>',
+  '      <div class="inspector-drawer">',
+  '        <details id="properties-details" class="drawer"><summary>Properties <span id="selection-name" class="muted">Nothing selected</span></summary>',
+  '          <div id="inspector" class="drawer-content"></div></details>',
+  '        <details id="history-details" class="drawer"><summary>Feature history <span id="feature-count" class="muted">0 operations</span></summary>',
+  '          <div id="feature-list" class="drawer-content"></div></details>',
+  '        <details id="profiles-details" class="drawer"><summary>Profiles <span class="muted">Open list</span></summary>',
+  '          <div id="profile-list" class="drawer-content"></div></details>',
+  '      </div>',
+  '    </aside>',
+  '  </main>',
+  '  <footer class="statusbar"><span id="status-dot" class="live-dot"></span><span id="status" role="status">Preparing workspace…</span>',
+  '    <span class="status-right">PROTOTYPE · NOT FABRICATION QUALIFIED</span>',
+  '    <button id="undo" class="status-action" aria-label="Undo" title="Undo">↶</button>',
+  '    <button id="redo" class="status-action" aria-label="Redo" title="Redo">↷</button></footer>',
+  '</div>',
+  '<dialog id="shortcuts-dialog" class="settings-dialog"><div class="dialog-head"><div><strong>Keyboard shortcuts</strong><small>Click a key to rebind it. Empty means unassigned.</small></div><button data-close="shortcuts-dialog">×</button></div>',
+  '  <div id="shortcut-rows" class="dialog-scroll"></div><div id="shortcut-error" role="alert" class="validation-error"></div>',
+  '  <footer><button id="shortcut-reset" class="button">Reset defaults</button><button id="settings-export" class="button">Export settings JSON</button><button id="settings-import" class="button">Import JSON</button><button data-close="shortcuts-dialog" class="button primary">Done</button></footer></dialog>',
+  '<dialog id="grid-dialog" class="settings-dialog"><div class="dialog-head"><div><strong>Grid and snapping</strong><small>Three independent scales · millimetres</small></div><button data-close="grid-dialog">×</button></div>',
+  '  <div id="grid-rows" class="dialog-scroll"></div><div id="grid-error" role="alert" class="validation-error"></div>',
+  '  <footer><button id="grid-reset" class="button">Reset defaults</button><button data-close="grid-dialog" class="button primary">Done</button></footer></dialog>'
+].join("\n");
+
+function byId<T extends HTMLElement=HTMLElement>(id:string):T{
+  const element=document.getElementById(id);
+  if(!element)throw new Error("Element not found: "+id);
+  return element as T;
+}
+function button(id:string):HTMLButtonElement{return byId<HTMLButtonElement>(id);}
+function input(id:string):HTMLInputElement{return byId<HTMLInputElement>(id);}
+function select(id:string):HTMLSelectElement{return byId<HTMLSelectElement>(id);}
+function status(message:string,error=false):void {
+  byId("status").textContent=message;
+  byId("status-dot").classList.toggle("error",error);
+}
+function initialDocument():CadDocument{
+  try{
+    const saved=localStorage.getItem(PROJECT_KEY);
+    return saved?validateDocument(JSON.parse(saved)):DEMO;
+  }catch{return DEMO;}
+}
+let doc=initialDocument();
+let prefs=loadPreferences();
+let history:CadDocument[]=[doc],historyIndex=0;
+let selectedId:string|null=null,activeTool:SketchTool="select";
+let activeMenu:string|null=null;
+let extrudeTarget:string|null=null;
+let shortcutRecording:ShortcutAction|null=null;
+let lastStats:{volumeMm3:number,boundsMm:[[number,number,number],[number,number,number]]}|null=null;
+let generation=0,buildTimer:ReturnType<typeof setTimeout>|undefined;
+let slotRadius=3;
+
+const kernel=new KernelClient();
+const canvas=new SketchCanvas(inputCanvas(),doc,prefs,{
+  onCreate:p=>safe(()=>{selectedId=p.id;change(appendProfile(doc,p));setTool("select");}),
+  onEdit:p=>safe(()=>change(updateProfile(doc,p))),
+  onSelect:id=>{selectedId=id;render();},
+  onExtrude:(id,at)=>openExtrude(id,undefined,at),
+  onExtrudeDepth:depth=>{
+    input("extrude-depth").value=String(depth);
+    input("extrude-through").checked=false;
+    if(resolveMode()==="cut"&&lastStats){
+      input("extrude-z").value=String(lastStats.boundsMm[1][2]-depth);
+    }
+  },
+  onViewChange:zoom=>{byId("zoom").textContent=zoom.toFixed(2)+" px/mm";},
+  onStatus:message=>status(message)
+});
+function inputCanvas():HTMLCanvasElement{return byId<HTMLCanvasElement>("sketch");}
+let preview:Preview|null=null;
+try{
+  const host=byId("preview");host.replaceChildren();preview=new Preview(host);
+}catch(error){
+  byId("preview").textContent="3D preview unavailable; sketching and STEP export remain available";
+  status(String(error),true);
+}
+function safe(run:()=>void):void{
+  try{run();}
+  catch(error){status(error instanceof Error?error.message:String(error),true);render();}
+}
+function persistDocument():void{
+  try{localStorage.setItem(PROJECT_KEY,JSON.stringify(doc));}
+  catch{status("Autosave unavailable; use File → Save project",true);}
+}
+function persistPreferences():void{
+  try{prefs=validatePreferences(prefs);savePreferences(prefs);canvas.setPreferences(prefs);}
+  catch(error){status("Settings invalid: "+String(error),true);}
+}
+function change(next:CadDocument):void{
+  doc=validateDocument(next);
+  history=[...history.slice(0,historyIndex+1),doc].slice(-100);
+  historyIndex=history.length-1;
+  persistDocument();render();rebuild();
+}
+function undoRedo(next:number):void{
+  if(next<0||next>=history.length)return;
+  historyIndex=next;doc=history[next];persistDocument();render();rebuild();
+}
+function setTool(tool:SketchTool):void{
+  closeExtrude();
+  activeTool=tool;canvas.setTool(tool);
+  document.querySelectorAll<HTMLButtonElement>("[data-tool]").forEach(element=>{
+    const active=element.dataset.tool===tool;
+    element.classList.toggle("active",active);
+    element.setAttribute("aria-pressed",String(active));
+  });
+  byId("sketch-context").textContent=tool==="centerRectangle"?"Centre rectangle":
+    tool==="extrude"?"Extrude / Cut":tool==="line"?"Line / Polyline":
+    tool.charAt(0).toUpperCase()+tool.slice(1);
+  const hint:Record<SketchTool,string>={
+    select:"Drag shapes to move · drag square handles to edit · E to extrude",
+    line:"Click vertices · click first point to close · Enter for open line",
+    rectangle:"Drag corner to corner · hold Shift for a square",
+    centerRectangle:"Drag outward from centre · hold Shift for a square",
+    circle:"Click centre and drag for radius",
+    polygon:"Click centre and drag · adjust sides and rotation above",
+    slot:"Drag between end centres · set radius above",
+    pan:"Drag to pan · wheel zooms at pointer",
+    extrude:"Click a closed profile to extrude or cut"
+  };
+  byId("canvas-hint").textContent=hint[tool];
+  renderToolOptions();closeMenu();
+}
+function getProfile(id:string|null):Profile|undefined{return doc.profiles.find(p=>p.id===id);}
+function selectProfile(id:string|null):void{selectedId=id;render();}
+function render():void{
+  if(selectedId&&!getProfile(selectedId))selectedId=null;
+  canvas.setDocument(doc);canvas.setSelected(selectedId);
+  byId("profile-count").textContent=String(doc.profiles.length)+" profiles";
+  byId("feature-count").textContent=String(doc.features.length)+" operations";
+  byId("selection-name").textContent=getProfile(selectedId)?.kind||"Nothing selected";
+  input("document-name").value=doc.name;
+  button("undo").disabled=historyIndex===0;
+  button("redo").disabled=historyIndex===history.length-1;
+  byId("selection-bar").hidden=!selectedId;
+  renderProfileList();renderProperties();renderHistory();
+}
+function numField(label:string,value:number,onChange:(x:number)=>void):HTMLLabelElement{
+  const wrap=document.createElement("label");wrap.className="field";
+  const caption=document.createElement("span");caption.textContent=label;
+  const box=document.createElement("input");box.type="number";box.step="any";box.value=String(value);
+  box.setAttribute("aria-label",label);
+  box.addEventListener("change",()=>{
+    const number=Number(box.value);
+    if(!Number.isFinite(number)){status("Enter a finite numerical value",true);render();return;}
+    safe(()=>onChange(number));
+  });
+  wrap.append(caption,box);return wrap;
+}
+function editProperty(profile:Profile,key:string,value:number):void{
+  const updated={...profile,[key]:value} as Profile;
+  change(updateProfile(doc,updated));
+}
+function renderProperties():void{
+  const target=byId("inspector");target.replaceChildren();
+  const p=getProfile(selectedId);
+  if(!p){target.textContent="Select a sketch element to edit its exact parameters.";return;}
+  const heading=document.createElement("strong");heading.textContent=p.kind+" · "+p.id;
+  target.append(heading);
+  const fields=document.createElement("div");fields.className="property-fields";
+  const add=(key:string,value:number,label=key)=>{
+    fields.append(numField(label,value,n=>editProperty(p,key,n)));
+  };
+  switch(p.kind){
+    case "rectangle":add("x",p.x,"Left X");add("y",p.y,"Bottom Y");add("width",p.width);add("height",p.height);break;
+    case "circle":add("x",p.x,"Centre X");add("y",p.y,"Centre Y");add("radius",p.radius);break;
+    case "polygon":add("x",p.x,"Centre X");add("y",p.y,"Centre Y");add("radius",p.radius);
+      add("sides",p.sides);add("rotation",p.rotation,"Rotation °");break;
+    case "slot":add("x1",p.x1,"Start X");add("y1",p.y1,"Start Y");add("x2",p.x2,"End X");
+      add("y2",p.y2,"End Y");add("radius",p.radius);break;
+    case "path":{
+      p.points.forEach((v,i)=>{
+        fields.append(numField("P"+(i+1)+" X",v.x,n=>{
+          const points=p.points.map((a,k)=>k===i?{...a,x:n}:a);change(updateProfile(doc,{...p,points}));
+        }));
+        fields.append(numField("P"+(i+1)+" Y",v.y,n=>{
+          const points=p.points.map((a,k)=>k===i?{...a,y:n}:a);change(updateProfile(doc,{...p,points}));
+        }));
+      });
+      const toggle=document.createElement("button");toggle.className="button";
+      toggle.textContent=p.closed?"Open polyline":"Close polyline";
+      toggle.onclick=()=>safe(()=>change(updateProfile(doc,{...p,closed:!p.closed})));
+      target.append(toggle);break;
+    }
+  }
+  target.append(fields);
+  const actions=document.createElement("div");actions.className="form-actions";
+  for(const [name,fn] of [
+    ["Extrude / Cut",()=>openExtrude(p.id)],
+    ["Duplicate",()=>duplicateSelected()],
+    ["Delete",()=>removeSelected()]
+  ] as [string,()=>void][]){
+    const b=document.createElement("button");b.className="button";b.textContent=name;b.onclick=fn;actions.append(b);
+  }
+  target.append(actions);
+}
+function renderProfileList():void{
+  const target=byId("profile-list");target.replaceChildren();
+  for(const p of doc.profiles){
+    const row=document.createElement("button");
+    row.className="profile-item"+(selectedId===p.id?" selected":"");
+    row.textContent=(p.kind==="path"&&!p.closed?"╱ ":"▭ ")+p.kind+" · "+p.id.slice(0,15);
+    row.onclick=()=>selectProfile(p.id);target.append(row);
+  }
+  if(!doc.profiles.length)target.textContent="Empty sketch — draw a profile.";
+}
+function renderHistory():void{
+  const target=byId("feature-list");target.replaceChildren();
+  if(!doc.features.length){target.textContent="No solid features yet. Select a shape and press E.";return;}
+  for(const f of doc.features){
+    const row=document.createElement("div");row.className="history-row";
+    const header=document.createElement("strong");
+    header.textContent=(f.operation==="add"?"+ ":"− ")+f.profileId.slice(0,12);
+    row.append(header);
+    const fields=document.createElement("div");fields.className="field-row";
+    const mode=document.createElement("select");mode.setAttribute("aria-label","Feature operation");
+    for(const operation of ["add","cut"] as const){
+      const option=document.createElement("option");option.value=operation;
+      option.textContent=operation==="add"?"Add":"Cut";option.selected=f.operation===operation;mode.add(option);
+    }
+    mode.onchange=()=>safe(()=>updateFeature({...f,operation:mode.value as "add"|"cut"}));
+    fields.append(mode);
+    fields.append(numField("Start Z",f.z,n=>updateFeature({...f,z:n})));
+    fields.append(numField("Depth",f.depth,n=>updateFeature({...f,depth:n})));
+    const remove=document.createElement("button");remove.className="delete-feature";remove.title="Delete operation";
+    remove.textContent="×";remove.onclick=()=>safe(()=>change(validateDocument({
+      ...doc,features:doc.features.filter(x=>x.id!==f.id)
+    })));
+    row.append(fields,remove);target.append(row);
+  }
+}
+function updateFeature(feature:Feature):void{
+  change(validateDocument({...doc,features:doc.features.map(f=>f.id===feature.id?feature:f)}));
+}
+function removeSelected():void {
+  if(!selectedId)return;
+  change(deleteProfile(doc,selectedId));selectedId=null;render();
+}
+function duplicateSelected():void {
+  const p=getProfile(selectedId);
+  if(!p)return;
+  const duplicate={...translate(p,5,5),id:newId("copy")};
+  selectedId=duplicate.id;change(appendProfile(doc,duplicate));
+}
+function rebuild():void {
+  const n=++generation;
+  clearTimeout(buildTimer);
+  const snapshot=doc;
+  status(snapshot.features.length?"Regenerating exact solid…":"Sketch ready · press E on a closed shape");
+  buildTimer=setTimeout(async()=>{
+    try{
+      const result=await kernel.build(snapshot);
+      if(n!==generation)return;
+      lastStats=result.statistics;
+      preview?.setMesh(result.mesh);
+      if(result.statistics){
+        byId("status").dataset.volumeMm3=String(result.statistics.volumeMm3);
+        byId("status").dataset.boundsMm=JSON.stringify(result.statistics.boundsMm);
+      }else{
+        delete byId("status").dataset.volumeMm3;
+        delete byId("status").dataset.boundsMm;
+      }
+      status(result.mesh?"Exact solid generated · "+result.statistics?.volumeMm3.toFixed(3)+" mm³":
+        "Sketch ready · press E on a closed shape");
+    }catch(error){
+      if(n!==generation)return;
+      lastStats=null;preview?.setMesh(null);
+      status("CAD build failed: "+String(error),true);
+    }
+  },180);
+}
+function renderToolOptions():void {
+  const panel=byId("shape-options");panel.replaceChildren();
+  if(activeTool!=="polygon"&&activeTool!=="slot"&&activeTool!=="line"){panel.hidden=true;return;}
+  panel.hidden=false;
+  if(activeTool==="line"){
+    panel.append(textNode("Line / polyline"));
+    const finish=document.createElement("button");finish.textContent="Finish open";
+    finish.onclick=()=>canvas.finishLine(false);
+    const close=document.createElement("button");close.textContent="Close outline";
+    close.onclick=()=>canvas.finishLine(true);
+    panel.append(finish,close);return;
+  }
+  if(activeTool==="slot"){
+    panel.append(textNode("Slot radius (mm)"));
+    panel.append(numField("Radius",slotRadius,n=>{
+      if(!(n>0))throw new Error("Radius must be positive");
+      slotRadius=n;canvas.setSlotRadius(n);
+    }));
+  }
+  if(activeTool==="polygon"){
+    panel.append(textNode("Polygon"));
+    panel.append(numField("Sides (3–64)",prefs.polygon.sides,n=>{
+      prefs=validatePreferences({...prefs,polygon:{...prefs.polygon,sides:n}});
+      persistPreferences();renderToolOptions();
+    }));
+    panel.append(numField("Rotation °",prefs.polygon.rotation,n=>{
+      prefs=validatePreferences({...prefs,polygon:{...prefs.polygon,rotation:n}});
+      persistPreferences();
+    }));
+  }
+}
+function textNode(text:string):HTMLElement{
+  const el=document.createElement("strong");el.textContent=text;return el;
+}
+function closeExtrude():void {
+  extrudeTarget=null;byId("extrude-flyout").hidden=true;canvas.setExtrudeHandle(null);
+}
+function throughAllBounds():[number,number] {
+  if(lastStats)return [lastStats.boundsMm[0][2]-1,lastStats.boundsMm[1][2]+1];
+  if(doc.features.length)return [Math.min(...doc.features.map(f=>f.z))-1,
+    Math.max(...doc.features.map(f=>f.z+f.depth))+1];
+  return [-1,9];
+}
+function resolveMode(): "add" | "cut" {
+  const manual=select("extrude-mode").value;
+  if(manual==="add"||manual==="cut")return manual;
+  const p=getProfile(extrudeTarget);
+  return p?suggestOperation(doc,p):"add";
+}
+function updateExtrudeMode():void {
+  if(!extrudeTarget)return;
+  const mode=resolveMode();
+  const autoOption=select("extrude-mode").options[0];
+  autoOption.textContent="Auto → "+(mode==="cut"?"Cut":"Add");
+  const thru=input("extrude-through");
+  thru.disabled=mode!=="cut"||doc.features.length===0;
+  if(thru.disabled)thru.checked=false;
+  if(mode==="cut"&&doc.features.length&&!thru.checked){
+    const [lo,hi]=throughAllBounds();
+    input("extrude-z").value=String(lo);
+    input("extrude-depth").value=String(hi-lo);
+    thru.checked=true;
+  }
+  canvas.setExtrudeHandle({id:extrudeTarget,depth:Number(input("extrude-depth").value)||8});
+}
+function openExtrude(id?:string,operation?:"add"|"cut",at?:Point2):void {
+  const selected=id||selectedId;
+  if(!selected){setTool("extrude");status("Click a closed shape to extrude or cut");return;}
+  const profile=getProfile(selected);
+  if(!profile||!isClosed(profile)){status("Open lines cannot be extruded. Close the path first.",true);return;}
+  closeMenu();selectedId=selected;activeTool="extrude";canvas.setTool("extrude");
+  document.querySelectorAll<HTMLButtonElement>("[data-tool]").forEach(el=>el.classList.toggle("active",el.dataset.tool==="extrude"));
+  extrudeTarget=selected;
+  const flyout=byId("extrude-flyout");
+  flyout.hidden=false;
+  byId("extrude-target").textContent=profile.kind+" · "+selected.slice(0,12);
+  selectMode(operation||"auto");
+  input("extrude-z").value="0";input("extrude-depth").value="8";input("extrude-through").checked=false;
+  updateExtrudeMode();
+  // Keep popover in viewport, close to the sketch geometry where invoked.
+  const wrap=byId("sketch-wrap").getBoundingClientRect();
+  const centrePoint=at||canvas.getSelectedPoint()||{x:wrap.width*.5,y:wrap.height*.5};
+  const posX=Math.max(90,Math.min(wrap.width-280,centrePoint.x+24));
+  const posY=Math.max(16,Math.min(wrap.height-290,centrePoint.y-45));
+  flyout.style.left=posX+"px";flyout.style.top=posY+"px";
+  render();
+  input("extrude-depth").focus();
+}
+function selectMode(mode:string):void{select("extrude-mode").value=mode;}
+function applyExtrude():void {
+  if(!extrudeTarget)return;
+  const mode=resolveMode();
+  const z=Number(input("extrude-z").value),depth=Number(input("extrude-depth").value);
+  safe(()=>{
+    const result=appendFeature(doc,{id:newId("feature"),profileId:extrudeTarget!,operation:mode,z,depth});
+    closeExtrude();change(result);setTool("select");
+  });
+}
+function toggleDetails(id:string):void{byId<HTMLDetailsElement>(id).open=true;closeMenu();}
+function download(blob:Blob,filename:string):void {
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");a.href=url;a.download=filename;
+  document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),3000);
+}
+function filename():string{return doc.name.toLowerCase().replace(/[^a-z0-9_-]+/g,"-").replace(/^-|-$/g,"")||"part";}
+function saveProject():void{
+  download(new Blob([JSON.stringify(doc,null,2)],{type:"application/json"}),filename()+".flatcad.json");
+  status("Editable native project downloaded");
+}
+function newProject():void {
+  selectedId=null;closeExtrude();
+  change({schemaVersion:2,name:"Untitled part",units:"mm",profiles:[],features:[]});
+  setTool("select");
+}
+async function openProject(file:File):Promise<void>{
+  if(file.size>2_000_000)throw new Error("Project exceeds 2 MB");
+  const loaded=validateDocument(JSON.parse(await file.text()));
+  doc=loaded;history=[doc];historyIndex=0;selectedId=null;
+  persistDocument();closeExtrude();render();rebuild();
+  status("Project loaded · "+doc.profiles.length+" profiles");
+}
+async function exportStep():Promise<void>{
+  if(!doc.features.length){status("Extrude at least one profile first",true);return;}
+  const snapshot=doc;status("Exporting exact STEP geometry…");
+  try{
+    const blob=await kernel.exportSTEP(snapshot);
+    if(blob.size<100)throw new Error("STEP export returned an empty or invalid file");
+    download(blob,filename()+".step");status("STEP exported · independent reader qualification remains required");
+  }catch(error){status("STEP export failed: "+String(error),true);}
+}
+const MENU:Record<string,[string,string][]> = {
+ file:[["New project","file.new"],["Open project…","file.open"],["Save native project","file.save"],["Export STEP","file.step"]],
+ sketch:[["Select","tool.select"],["Line / polyline","tool.line"],["Rectangle","tool.rectangle"],
+   ["Centre rectangle","tool.centerRectangle"],["Circle","tool.circle"],["Regular polygon","tool.polygon"],
+   ["Slot","tool.slot"],["Finish open line","line.finish"],["Close line outline","line.close"],
+   ["Duplicate selected","edit.duplicate"],["Delete selected","edit.delete"],["Exact properties","view.properties"]],
+ model:[["Extrude / Cut (Auto)","feature.extrude"],["Add extrusion","model.add"],
+   ["Subtract extrusion","model.cut"],["Feature history","view.history"]],
+ view:[["Pan","tool.pan"],["Grid and snapping…","dialog.grid"],["Profile list","view.profiles"],
+   ["Properties","view.properties"],["History","view.history"]],
+ settings:[["Keyboard shortcuts…","dialog.shortcuts"],["Grid and snapping…","dialog.grid"],
+   ["Export settings JSON","prefs.export"],["Import settings JSON","prefs.import"],["Reset settings","prefs.reset"]]
+};
+function closeMenu():void{activeMenu=null;byId("menu-popover").hidden=true;}
+function openMenu(name:string):void{
+  if(activeMenu===name){closeMenu();return;}
+  activeMenu=name;const panel=byId("menu-popover");panel.replaceChildren();
+  const anchor=document.querySelector<HTMLElement>('[data-menu="'+name+'"]');
+  if(anchor){panel.style.left=Math.max(0,anchor.offsetLeft)+"px";}
+  for(const [label,action] of MENU[name]||[]){
+    const b=document.createElement("button");
+    b.dataset.command=action;b.setAttribute("role","menuitem");
+    b.textContent=label;
+    const chord=prefs.shortcuts[action as ShortcutAction];
+    if(chord){
+      const hint=document.createElement("span");hint.textContent=displayShortcut(chord);hint.className="menu-shortcut";b.append(hint);
+    }
+    b.onclick=()=>{closeMenu();command(action);};
+    panel.append(b);
+  }
+  panel.hidden=false;
+}
+function command(action:string):void{
+  if(action.startsWith("tool.")){setTool(action.slice(5) as SketchTool);return;}
+  switch(action){
+    case "feature.extrude":openExtrude();break;
+    case "model.add":openExtrude(undefined,"add");break;
+    case "model.cut":openExtrude(undefined,"cut");break;
+    case "edit.delete":safe(removeSelected);break;
+    case "edit.duplicate":safe(duplicateSelected);break;
+    case "edit.undo":undoRedo(historyIndex-1);break;
+    case "edit.redo":undoRedo(historyIndex+1);break;
+    case "line.finish":canvas.finishLine(false);break;
+    case "line.close":canvas.finishLine(true);break;
+    case "view.properties":toggleDetails("properties-details");break;
+    case "view.profiles":toggleDetails("profiles-details");break;
+    case "view.history":toggleDetails("history-details");break;
+    case "file.new":newProject();break;
+    case "file.open":input("project-input").click();break;
+    case "file.save":saveProject();break;
+    case "file.step":void exportStep();break;
+    case "dialog.shortcuts":showShortcuts();break;
+    case "dialog.grid":showGrid();break;
+    case "prefs.export":exportSettings();break;
+    case "prefs.import":input("settings-input").click();break;
+    case "prefs.reset":prefs=defaultPreferences();persistPreferences();status("Settings reset to defaults");break;
+  }
+}
+function dialog(id:string):HTMLDialogElement{return byId<HTMLDialogElement>(id);}
+function showShortcuts():void{
+  closeMenu();renderShortcuts();dialog("shortcuts-dialog").showModal();
+}
+function renderShortcuts():void {
+  const area=byId("shortcut-rows");area.replaceChildren();
+  for(const [action,label] of Object.entries(ACTION_LABELS) as [ShortcutAction,string][]){
+    const row=document.createElement("div");row.className="shortcut-row";
+    const title=document.createElement("span");title.textContent=label;
+    const key=document.createElement("button");key.className="button shortcut-key";
+    key.textContent=shortcutRecording===action?"Press keys…":displayShortcut(prefs.shortcuts[action])||"Unassigned";
+    key.dataset.action=action;
+    key.onclick=()=>{
+      shortcutRecording=action;byId("shortcut-error").textContent="Press a key combination · Esc to cancel";
+      renderShortcuts();
+    };
+    const clear=document.createElement("button");clear.className="text-button";clear.textContent="Clear";
+    clear.onclick=()=>{
+      shortcutRecording=null;
+      prefs=validatePreferences({...prefs,shortcuts:{...prefs.shortcuts,[action]:""}});
+      persistPreferences();renderShortcuts();
+    };
+    row.append(title,key,clear);area.append(row);
+  }
+}
+function showGrid():void{
+  closeMenu();renderGrid();dialog("grid-dialog").showModal();
+}
+function renderGrid():void{
+  const area=byId("grid-rows");area.replaceChildren();
+  prefs.grid.tiers.forEach((tier,i)=>{
+    const row=document.createElement("div");row.className="grid-tier-row";
+    const label=document.createElement("strong");label.textContent=tier.label;
+    const enabled=document.createElement("input");enabled.type="checkbox";enabled.checked=tier.enabled;enabled.title="Display "+tier.label;
+    const spacing=document.createElement("input");spacing.type="number";spacing.step="any";spacing.min="0.001";
+    spacing.value=String(tier.spacing);spacing.setAttribute("aria-label",tier.label+" spacing mm");
+    const color=document.createElement("input");color.type="color";color.value=tier.color;
+    color.setAttribute("aria-label",tier.label+" grid colour");
+    const snap=document.createElement("input");snap.type="checkbox";snap.checked=tier.snap;snap.title="Snap "+tier.label;
+    const update=()=>{
+      try{
+        const layers=prefs.grid.tiers.map((x,k)=>k===i?{...x,enabled:enabled.checked,
+          spacing:Number(spacing.value),color:color.value,snap:snap.checked}:x) as Preferences["grid"]["tiers"];
+        prefs=validatePreferences({...prefs,grid:{...prefs.grid,tiers:layers}});
+        persistPreferences();byId("grid-error").textContent="";
+      }catch(error){byId("grid-error").textContent=String(error);}
+    };
+    for(const el of [enabled,spacing,color,snap])el.addEventListener("change",update);
+    const spacingLabel=document.createElement("span");spacingLabel.textContent="Spacing mm";
+    const snapLabel=document.createElement("span");snapLabel.textContent="Snap";
+    row.append(label,enabled,spacingLabel,spacing,color,snapLabel,snap);
+    area.append(row);
+  });
+  const geometryRow=document.createElement("label");geometryRow.className="check geom-snap";
+  const tick=document.createElement("input");tick.type="checkbox";tick.checked=prefs.grid.snapGeometry;
+  tick.onchange=()=>{
+    prefs=validatePreferences({...prefs,grid:{...prefs.grid,snapGeometry:tick.checked}});
+    persistPreferences();
+  };
+  geometryRow.append(tick,document.createTextNode("Snap to existing geometry (vertices, centres, midpoints)"));
+  area.append(geometryRow);
+}
+function exportSettings():void {
+  download(new Blob([JSON.stringify(prefs,null,2)],{type:"application/json"}),"flatcad-settings.json");
+  status("Keyboard, grid and polygon defaults exported");
+}
+async function importSettings(file:File):Promise<void>{
+  if(file.size>100000)throw new Error("Settings JSON exceeds 100 KB");
+  const replacement=validatePreferences(JSON.parse(await file.text()));
+  prefs=replacement;persistPreferences();
+  renderToolOptions();
+  if(dialog("shortcuts-dialog").open)renderShortcuts();
+  if(dialog("grid-dialog").open)renderGrid();
+  status("Settings imported and applied");
+}
+
+// UI events. All menu commands reuse the exact same implementations as direct controls.
+document.querySelectorAll<HTMLButtonElement>("[data-menu]").forEach(el=>{
+  el.onclick=()=>openMenu(el.dataset.menu!);
+});
+document.querySelectorAll<HTMLButtonElement>("[data-tool]").forEach(el=>{
+  el.onclick=()=>setTool(el.dataset.tool as SketchTool);
+});
+byId("sketch-wrap").addEventListener("pointerdown",event=>{
+  if(!(event.target as HTMLElement).closest(".menu-popover"))closeMenu();
+});
+document.addEventListener("pointerdown",event=>{
+  if(!(event.target as HTMLElement).closest("#menus"))closeMenu();
+});
+button("quick-extrude").onclick=()=>openExtrude();
+button("selection-extrude").onclick=()=>openExtrude();
+button("selection-delete").onclick=()=>safe(removeSelected);
+button("selection-duplicate").onclick=()=>safe(duplicateSelected);
+button("selection-properties").onclick=()=>toggleDetails("properties-details");
+button("grid-quick").onclick=showGrid;
+button("cancel-extrude").onclick=closeExtrude;
+button("dismiss-extrude").onclick=closeExtrude;
+button("apply-extrude").onclick=applyExtrude;
+select("extrude-mode").addEventListener("change",updateExtrudeMode);
+input("extrude-through").onchange=()=>{
+  if(input("extrude-through").checked){
+    const [min,max]=throughAllBounds();
+    input("extrude-z").value=String(min);input("extrude-depth").value=String(max-min);
+  }
+  canvas.setExtrudeHandle({id:extrudeTarget||"",depth:Number(input("extrude-depth").value)||8});
+};
+input("extrude-depth").oninput=()=>{
+  if(!extrudeTarget)return;
+  const depth=Number(input("extrude-depth").value);
+  input("extrude-through").checked=false;
+  if(resolveMode()==="cut"&&lastStats&&Number.isFinite(depth)){
+    input("extrude-z").value=String(lastStats.boundsMm[1][2]-depth);
+  }
+  canvas.setExtrudeHandle({id:extrudeTarget,depth:depth||8});
+};
+input("extrude-z").oninput=()=>{input("extrude-through").checked=false;};
+button("undo").onclick=()=>undoRedo(historyIndex-1);
+button("redo").onclick=()=>undoRedo(historyIndex+1);
+input("document-name").onchange=()=>safe(()=>change(validateDocument({...doc,name:input("document-name").value.trim()})));
+input("project-input").onchange=async event=>{
+  const el=event.target as HTMLInputElement;
+  if(el.files?.[0]){
+    try{await openProject(el.files[0]);}
+    catch(error){status("Project import rejected: "+String(error),true);}
+  }
+  el.value="";
+};
+input("settings-input").onchange=async event=>{
+  const el=event.target as HTMLInputElement;
+  if(el.files?.[0]){
+    try{await importSettings(el.files[0]);}
+    catch(error){status("Settings import rejected: "+String(error),true);}
+  }
+  el.value="";
+};
+document.querySelectorAll<HTMLButtonElement>("[data-close]").forEach(el=>{
+  el.onclick=()=>dialog(el.dataset.close!).close();
+});
+button("shortcut-reset").onclick=()=>{
+  prefs=validatePreferences({...prefs,shortcuts:{...defaultPreferences().shortcuts}});
+  persistPreferences();shortcutRecording=null;renderShortcuts();
+};
+button("grid-reset").onclick=()=>{
+  prefs=validatePreferences({...prefs,grid:defaultPreferences().grid});
+  persistPreferences();renderGrid();
+};
+button("settings-export").onclick=exportSettings;
+button("settings-import").onclick=()=>input("settings-input").click();
+
+document.addEventListener("keydown",event=>{
+  if(shortcutRecording){
+    event.preventDefault();event.stopPropagation();
+    if(event.code==="Escape"){shortcutRecording=null;renderShortcuts();return;}
+    const action=shortcutRecording;
+    try{
+      const chord=validateShortcut(chordFromEvent(event));
+      prefs=validatePreferences({...prefs,shortcuts:{...prefs.shortcuts,[action]:chord}});
+      shortcutRecording=null;persistPreferences();byId("shortcut-error").textContent="";renderShortcuts();
+    }catch(error){byId("shortcut-error").textContent=String(error);}
+    return;
+  }
+  if(dialog("shortcuts-dialog").open||dialog("grid-dialog").open)return;
+  if(!byId("extrude-flyout").hidden){
+    if(event.code==="Escape"){event.preventDefault();closeExtrude();setTool("select");return;}
+    if(event.code==="Enter"){event.preventDefault();applyExtrude();return;}
+  }
+  if(activeTool==="line"){
+    if(event.code==="Escape"){event.preventDefault();canvas.cancelLine();return;}
+    if(event.code==="Enter"){event.preventDefault();canvas.finishLine(false);return;}
+    if(event.code==="Backspace"){event.preventDefault();canvas.removeLastLinePoint();return;}
+  }
+  const target=event.target as HTMLElement;
+  if(target.closest("input,textarea,select,[contenteditable]"))return;
+  let chord=chordFromEvent(event);
+  // Ctrl/Command shortcuts map to one user-facing preference unless rebound.
+  if(event.metaKey&&!event.ctrlKey)chord=chord.replace("Meta+","Control+");
+  const selectedShortcut=Object.entries(prefs.shortcuts).find(([,value])=>value===chord)?.[0];
+  if(selectedShortcut){event.preventDefault();command(selectedShortcut);return;}
+  if(chord==="Control+KeyY"){event.preventDefault();undoRedo(historyIndex+1);return;}
+  if(chord==="Escape"){if(activeMenu)closeMenu();else setTool("select");return;}
+});
+document.addEventListener("keydown",event=>{
+  if(event.code==="Space"&&!event.repeat&&!(event.target as HTMLElement).closest("input,textarea,select")&&
+    !dialog("shortcuts-dialog").open&&!dialog("grid-dialog").open){
+    if(activeTool!=="pan"){event.preventDefault();priorTool=activeTool;setTool("pan");}
+  }
+});
+let priorTool:SketchTool|null=null;
+document.addEventListener("keyup",event=>{
+  if(event.code==="Space"&&priorTool){setTool(priorTool);priorTool=null;}
+});
+window.addEventListener("storage",event=>{
+  if(event.key===PREFS_KEY){prefs=loadPreferences();canvas.setPreferences(prefs);}
+});
+setTool(activeTool);render();rebuild();
