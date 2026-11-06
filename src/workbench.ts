@@ -137,7 +137,13 @@ const canvas=new SketchCanvas(inputCanvas(),doc,prefs,{
   onEdit:p=>safe(()=>change(updateProfile(doc,p))),
   onSelect:id=>{selectedId=id;render();},
   onExtrude:(id,at)=>openExtrude(id,undefined,at),
-  onExtrudeDepth:depth=>{input("extrude-depth").value=String(depth);input("extrude-through").checked=false;},
+  onExtrudeDepth:depth=>{
+    input("extrude-depth").value=String(depth);
+    input("extrude-through").checked=false;
+    if(resolveMode()==="cut"&&lastStats){
+      input("extrude-z").value=String(lastStats.boundsMm[1][2]-depth);
+    }
+  },
   onViewChange:zoom=>{byId("zoom").textContent=zoom.toFixed(2)+" px/mm";},
   onStatus:message=>status(message)
 });
@@ -639,7 +645,13 @@ input("extrude-through").onchange=()=>{
   canvas.setExtrudeHandle({id:extrudeTarget||"",depth:Number(input("extrude-depth").value)||8});
 };
 input("extrude-depth").oninput=()=>{
-  if(extrudeTarget)canvas.setExtrudeHandle({id:extrudeTarget,depth:Number(input("extrude-depth").value)||8});
+  if(!extrudeTarget)return;
+  const depth=Number(input("extrude-depth").value);
+  input("extrude-through").checked=false;
+  if(resolveMode()==="cut"&&lastStats&&Number.isFinite(depth)){
+    input("extrude-z").value=String(lastStats.boundsMm[1][2]-depth);
+  }
+  canvas.setExtrudeHandle({id:extrudeTarget,depth:depth||8});
 };
 input("extrude-z").oninput=()=>{input("extrude-through").checked=false;};
 button("undo").onclick=()=>undoRedo(historyIndex-1);
@@ -705,7 +717,7 @@ document.addEventListener("keydown",event=>{
   const selectedShortcut=Object.entries(prefs.shortcuts).find(([,value])=>value===chord)?.[0];
   if(selectedShortcut){event.preventDefault();command(selectedShortcut);return;}
   if(chord==="Control+KeyY"){event.preventDefault();undoRedo(historyIndex+1);return;}
-  if(chord==="Escape"){setTool("select");return;}
+  if(chord==="Escape"){if(activeMenu)closeMenu();else setTool("select");return;}
 });
 document.addEventListener("keydown",event=>{
   if(event.code==="Space"&&!event.repeat&&!(event.target as HTMLElement).closest("input,textarea,select")&&

@@ -110,13 +110,14 @@ export class SketchCanvas {
   private toScreen(p:Point2):Point2 {
     return {x:this.panX+p.x*this.zoom,y:this.panY-p.y*this.zoom};
   }
-  private maybeSnap(raw:Point2,event:{altKey?:boolean}):Point2 {
+  private maybeSnap(raw:Point2,event:{altKey?:boolean},excludeId?:string):Point2 {
     this.highlightedSnap=null;
     if(event.altKey)return raw;
     const maxDist=10/this.zoom;
     if(this.prefs.grid.snapGeometry){
       let target:Point2|null=null,minimum=maxDist;
       for(const profile of this.doc.profiles){
+        if(profile.id===excludeId)continue;
         for(const point of snapPoints(profile)){
           const d=distance(raw,point);
           if(d<minimum){minimum=d;target=point;}
@@ -126,7 +127,7 @@ export class SketchCanvas {
     }
     let best=raw,nearest=Infinity;
     for(const tier of this.prefs.grid.tiers){
-      if(!tier.enabled||!tier.snap)continue;
+      if(!tier.snap)continue; // Snapping is independent of grid visibility.
       const p={x:Math.round(raw.x/tier.spacing)*tier.spacing,
         y:Math.round(raw.y/tier.spacing)*tier.spacing};
       const d=distance(raw,p);
@@ -214,7 +215,8 @@ export class SketchCanvas {
       if(this.extrude)this.extrude={...this.extrude,depth};
       this.events.onExtrudeDepth(depth);
     }else{
-      const world=this.maybeSnap(this.world(screen),event);
+      const world=this.maybeSnap(this.world(screen),event,
+        (g.kind==="move"||g.kind==="handle")?g.original.id:undefined);
       if(g.kind==="draw"){g.to=world;g.shift=event.shiftKey;}
       else if(g.kind==="move"){
         let dx=world.x-g.from.x,dy=world.y-g.from.y;

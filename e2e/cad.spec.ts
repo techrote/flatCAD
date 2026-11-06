@@ -129,7 +129,7 @@ test("three grid tiers and shortcut rebindings persist in exported settings JSON
   await expect(page.locator("#grid-rows .grid-tier-row")).toHaveCount(3);
   await page.getByLabel("Fine spacing mm").fill("2.5");
   await page.getByLabel("Fine spacing mm").press("Tab");
-  await page.locator('[data-close="grid-dialog"]').click();
+  await page.locator('[data-close="grid-dialog"]').last().click();
   await page.keyboard.press("k");
   await expect(page.locator("#shortcuts-dialog")).toBeVisible();
   await page.locator('[data-action="tool.rectangle"]').click();
@@ -142,7 +142,7 @@ test("three grid tiers and shortcut rebindings persist in exported settings JSON
   expect(settings.grid.tiers).toHaveLength(3);
   expect(settings.grid.tiers[0].spacing).toBe(2.5);
   expect(settings.shortcuts["tool.rectangle"]).toBe("KeyT");
-  await page.locator('[data-close="shortcuts-dialog"]').click();
+  await page.locator('[data-close="shortcuts-dialog"]').last().click();
   await page.keyboard.press("t");
   await expect(page.locator('[data-tool="rectangle"]')).toHaveClass(/active/);
 });
