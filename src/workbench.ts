@@ -475,10 +475,10 @@ function closeExtrude():void {
 }
 function throughAllBounds():[number,number] {
   if(lastStats)return [lastStats.boundsMm[0][2]-1,lastStats.boundsMm[1][2]+1];
-  if(doc.features.length)return [
-    Math.min(...doc.features.map(f=>f.z))-1,
-    Math.max(...doc.features.map(f=>f.z+f.depth))+1
-  ];
+  if(doc.features.length){
+    const ends=doc.features.flatMap(f=>[f.z,f.z+f.depth]);
+    return [Math.min(...ends)-1,Math.max(...ends)+1];
+  }
   return [-1,9];
 }
 function resolveMode(): "add" | "cut" {
