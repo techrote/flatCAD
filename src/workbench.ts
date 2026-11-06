@@ -7,6 +7,8 @@ import {
 import { isClosed, translate } from "./geometry";
 import { nextSelection, selectedProfiles, suggestGroupOperation, documentWithExtrusions, documentWithMovedProfiles } from "./selection";
 import { placeExtrudeMenu } from "./extrude-placement";
+import { depthToFace } from "./signed-extrusion";
+import { NAVIGATION_HINTS, NAVIGATION_LABELS, NAVIGATION_PRESETS, type NavigationPreset } from "./navigation";
 import type { KernelBuild } from "./kernel-protocol";
 import { SketchCanvas, type SketchTool } from "./sketch-canvas-v2";
 import { KernelClient } from "./kernel-client";
@@ -67,13 +69,15 @@ root.innerHTML=[
   '          <div class="flyout-head"><strong>Extrude</strong><button id="cancel-extrude" aria-label="Cancel extrusion">×</button></div>',
   '          <div id="extrude-target" class="flyout-subtitle"></div>',
   '          <label class="field"><span>Operation</span><select id="extrude-mode"><option value="auto">Auto</option><option value="add">Add / Join</option><option value="cut">Cut</option></select></label>',
-  '          <div class="field-row"><label class="field"><span>Start Z · mm</span><input type="number" step="any" id="extrude-z" value="0"></label>',
-  '            <label class="field"><span>Depth · mm</span><input type="number" min="0.001" step="any" id="extrude-depth" value="8"></label></div>',
+  '          <div class="field-row"><label class="field"><span>Start Z · mm</span><input type="number" step="any" id="extrude-z" value="0" title="Click a horizontal face in Solid view to fill Start Z"></label>',
+  '            <label class="field"><span>Depth · mm</span><input type="number" step="any" id="extrude-depth" value="8" title="Signed depth: negative extrudes down; click a horizontal face for a target elevation"></label></div>',
   '          <label class="check through-all"><input type="checkbox" id="extrude-through"> Through all (cut)</label>',
   '          <label class="check live-preview"><input type="checkbox" id="extrude-preview" checked> Preview in solid view</label>',
+  '          <div class="flyout-face-hint">ⓘ Click a horizontal face in Solid view to fill the last-focused <strong>Start Z</strong> or <strong>Depth</strong> field.</div>',
   '          <span id="extrude-preview-error" class="preview-error" role="status" hidden></span>',
   '          <div class="form-actions"><button id="apply-extrude" class="button primary">Apply <kbd>Enter</kbd></button><button id="dismiss-extrude" class="button muted-button">Cancel</button></div>',
-  '          <small class="flyout-hint">Drag the amber arrow in the sketch to set depth</small>',
+  '          <small class="flyout-hint">Drag the amber arrow to set positive or negative depth</small>',
+  '          <small id="extrude-nav-hint" class="flyout-nav-hint">MMB pan · Shift+MMB orbit</small>',
   '        </section>',
   '        <div id="canvas-hint" class="canvas-hint">Select a shape or press a drawing shortcut</div>',
   '      </div>',
@@ -106,7 +110,10 @@ root.innerHTML=[
   '  <footer><button id="shortcut-reset" class="button">Reset defaults</button><button id="settings-export" class="button">Export settings JSON</button><button id="settings-import" class="button">Import JSON</button><button data-close="shortcuts-dialog" class="button primary">Done</button></footer></dialog>',
   '<dialog id="grid-dialog" class="settings-dialog"><div class="dialog-head"><div><strong>Grid and snapping</strong><small>Three independent scales · millimetres</small></div><button data-close="grid-dialog">×</button></div>',
   '  <div id="grid-rows" class="dialog-scroll"></div><div id="grid-error" role="alert" class="validation-error"></div>',
-  '  <footer><button id="grid-reset" class="button">Reset defaults</button><button data-close="grid-dialog" class="button primary">Done</button></footer></dialog>'
+  '  <footer><button id="grid-reset" class="button">Reset defaults</button><button data-close="grid-dialog" class="button primary">Done</button></footer></dialog>',
+  '<dialog id="navigation-dialog" class="settings-dialog"><div class="dialog-head"><div><strong>CAD navigation controls</strong><small>Choose the mouse behavior familiar from your CAD application.</small></div><button data-close="navigation-dialog">×</button></div>',
+  '  <div class="dialog-scroll"><label class="field"><span>Control scheme</span><select id="navigation-preset" aria-label="Navigation control scheme"></select></label><p id="navigation-hint" class="navigation-hint"></p></div>',
+  '  <footer><button data-close="navigation-dialog" class="button primary">Done</button></footer></dialog>'
 ].join("\n");
 
 function byId<T extends HTMLElement=HTMLElement>(id:string):T{
@@ -133,6 +140,8 @@ let history:CadDocument[]=[doc],historyIndex=0;
 let selectedId:string|null=null,selectedIds:string[]=[],activeTool:SketchTool="select";
 let activeMenu:string|null=null;
 let extrudeTarget:string|null=null,extrudeTargets:string[]=[];
+let extrudeCursor:{x:number,y:number}|null=null;
+let facePickField:"z"|"depth"="depth";
 let previewEnabled=true,previewToken=0,previewInFlight=false;
 let previewTimer:ReturnType<typeof setTimeout>|undefined;
 let committedBuild:KernelBuild|null=null;
@@ -153,11 +162,14 @@ const canvas=new SketchCanvas(inputCanvas(),doc,prefs,{
   onSelect:(id,additive=false)=>selectProfile(id,additive),
   onExtrude:(id,at)=>openExtrude(id,undefined,at),
   onExtrudeDepth:depth=>{
+    const wasThrough=input("extrude-through").checked;
     input("extrude-depth").value=String(depth);
     input("extrude-through").checked=false;
-    if(resolveMode()==="cut"&&lastStats){
-      input("extrude-z").value=String(lastStats.boundsMm[1][2]-depth);
+    if(wasThrough&&resolveMode()==="cut"&&lastStats){
+      const top=lastStats.boundsMm[1][2];
+      input("extrude-z").value=String(depth<0?top:top-depth);
     }
+    positionExtrudeMenu();
     scheduleOperationPreview();
   },
   onViewChange:zoom=>{
@@ -170,6 +182,8 @@ function inputCanvas():HTMLCanvasElement{return byId<HTMLCanvasElement>("sketch"
 let preview:Preview|null=null;
 try{
   const host=byId("preview");host.replaceChildren();preview=new Preview(host);
+  preview.setNavigationPreset(prefs.navigation);
+  preview.setFacePickHandler(z=>fillFocusedFieldFromFace(z));
 }catch(error){
   byId("preview").textContent="3D preview unavailable; sketching and STEP export remain available";
   status(String(error),true);
@@ -185,6 +199,8 @@ function persistDocument():void{
 function persistPreferences():void{
   try{
     prefs=validatePreferences(prefs);savePreferences(prefs);canvas.setPreferences(prefs);
+    preview?.setNavigationPreset(prefs.navigation);
+    byId("extrude-nav-hint").textContent=NAVIGATION_HINTS[prefs.navigation];
     if(extrudeTarget)positionExtrudeMenu();
   }catch(error){status("Settings invalid: "+String(error),true);}
 }
@@ -383,6 +399,8 @@ function rebuild():void {
       if(n!==generation)return;
       lastStats=result.statistics;
       committedBuild=result;
+      preview?.setFaceElevations(snapshot.features.flatMap(f=>[f.z,f.z+f.depth]));
+      preview?.setCommittedPickMesh(result.mesh);
       if(extrudeTargets.length&&input("extrude-preview").checked) scheduleOperationPreview();
       else preview?.setMesh(result.mesh);
       if(result.statistics){
@@ -397,6 +415,7 @@ function rebuild():void {
     }catch(error){
       if(n!==generation)return;
       lastStats=null;committedBuild=null;
+      preview?.setCommittedPickMesh(null);preview?.setFaceElevations([]);
       if(!extrudeTargets.length||!input("extrude-preview").checked)preview?.setMesh(null);
       status("CAD build failed: "+String(error),true);
     }
