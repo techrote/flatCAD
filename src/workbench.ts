@@ -849,6 +849,7 @@ const MENU:Record<string,[string,string][]> = {
    ["Properties","view.properties"],["History","view.history"]],
  settings:[["Keyboard shortcuts…","dialog.shortcuts"],["Grid and snapping…","dialog.grid"],
    ["CAD navigation controls…","dialog.navigation"],
+   ["Toggle remember mouse surfaces","prefs.remember"],
    ["Export settings JSON","prefs.export"],["Import settings JSON","prefs.import"],["Reset settings","prefs.reset"]]
 };
 function closeMenu():void{activeMenu=null;byId("menu-popover").hidden=true;}
@@ -894,6 +895,11 @@ function command(action:string):void{
     case "dialog.navigation":showNavigation();break;
     case "prefs.export":exportSettings();break;
     case "prefs.import":input("settings-input").click();break;
+    case "prefs.remember":
+      prefs=validatePreferences({...prefs,rememberSurfaces:!prefs.rememberSurfaces});
+      persistPreferences();
+      status("Remember mouse surfaces "+(prefs.rememberSurfaces?"enabled":"disabled"));
+      break;
     case "prefs.reset":prefs=defaultPreferences();persistPreferences();status("Settings reset to defaults");break;
   }
 }
@@ -931,6 +937,7 @@ function showNavigation():void{
     option.textContent=NAVIGATION_LABELS[preset];control.append(option);
   }
   control.value=prefs.navigation;
+  input("remember-surfaces").checked=prefs.rememberSurfaces;
   byId("navigation-hint").textContent=NAVIGATION_HINTS[prefs.navigation];
   dialog("navigation-dialog").showModal();
 }
@@ -984,12 +991,17 @@ async function importSettings(file:File):Promise<void>{
   if(dialog("grid-dialog").open)renderGrid();
   if(dialog("navigation-dialog").open){
     select("navigation-preset").value=prefs.navigation;
+    input("remember-surfaces").checked=prefs.rememberSurfaces;
     byId("navigation-hint").textContent=NAVIGATION_HINTS[prefs.navigation];
   }
   status("Settings imported and applied");
 }
 
 // UI events. All menu commands reuse the exact same implementations as direct controls.
+input("remember-surfaces").onchange=()=>{
+  prefs=validatePreferences({...prefs,rememberSurfaces:input("remember-surfaces").checked});
+  persistPreferences();
+};
 select("navigation-preset").onchange=()=>{
   prefs=validatePreferences({...prefs,navigation:select("navigation-preset").value as NavigationPreset});
   persistPreferences();
@@ -1006,6 +1018,7 @@ byId("sketch-wrap").addEventListener("pointerdown",event=>{
 });
 document.addEventListener("pointerdown",event=>{
   if(!(event.target as HTMLElement).closest("#menus"))closeMenu();
+  if(!(event.target as HTMLElement).closest("#face-context-menu"))hideSurfaceContext();
 });
 button("quick-extrude").onclick=()=>openExtrude();
 button("selection-extrude").onclick=()=>openExtrude();
@@ -1108,7 +1121,10 @@ document.addEventListener("keydown",event=>{
   const selectedShortcut=Object.entries(prefs.shortcuts).find(([,value])=>value===chord)?.[0];
   if(selectedShortcut){event.preventDefault();command(selectedShortcut);return;}
   if(chord==="Control+KeyY"){event.preventDefault();undoRedo(historyIndex+1);return;}
-  if(chord==="Escape"){if(activeMenu)closeMenu();else setTool("select");return;}
+  if(chord==="Escape"){
+    if(!byId("face-context-menu").hidden)hideSurfaceContext();
+    else if(activeMenu)closeMenu();else setTool("select");return;
+  }
 });
 document.addEventListener("keydown",event=>{
   if(event.code==="Space"&&!event.repeat&&!(event.target as HTMLElement).closest("input,textarea,select")&&
@@ -1125,6 +1141,7 @@ window.addEventListener("storage",event=>{
     prefs=loadPreferences();canvas.setPreferences(prefs);
     preview?.setNavigationPreset(prefs.navigation);
     byId("extrude-nav-hint").textContent=NAVIGATION_HINTS[prefs.navigation];
+    input("remember-surfaces").checked=prefs.rememberSurfaces;
   }
 });
 byId("extrude-nav-hint").textContent=NAVIGATION_HINTS[prefs.navigation];
