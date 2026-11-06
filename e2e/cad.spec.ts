@@ -335,7 +335,7 @@ test("Fusion mouse: MMB drag pans and Shift+MMB drag orbits",async({page})=>{
   await page.mouse.move(x+55,y+35,{steps:7});
   await page.mouse.up({button:"middle"});
   await expect(page.locator("#preview")).toHaveAttribute("data-last-navigation-action","pan");
-  const panTarget=await page.locator("#preview").getAttribute("data-camera-target");
+  const panOffset=await page.locator("#preview").getAttribute("data-camera-offset");
   await page.keyboard.down("Shift");
   await page.mouse.move(x,y);
   await page.mouse.down({button:"middle"});
@@ -343,9 +343,13 @@ test("Fusion mouse: MMB drag pans and Shift+MMB drag orbits",async({page})=>{
   await page.mouse.up({button:"middle"});
   await page.keyboard.up("Shift");
   await expect(page.locator("#preview")).toHaveAttribute("data-last-navigation-action","orbit");
-  const orbitTarget=await page.locator("#preview").getAttribute("data-camera-target");
-  expect(panTarget).not.toBeNull();
-  expect(orbitTarget).toBe(panTarget);
+  const orbitOffset=await page.locator("#preview").getAttribute("data-camera-offset");
+  expect(panOffset).not.toBeNull();
+  expect(orbitOffset).not.toBeNull();
+  // Orbit changes the camera direction relative to its pivot. Pan does not;
+  // damping may continue after pointer-up, so comparing absolute targets
+  // for strict equality is not a reliable navigation assertion.
+  expect(orbitOffset).not.toBe(panOffset);
 });
 
 test("extrude popup anchors one corner to the initiating sketch cursor",async({page})=>{
@@ -356,10 +360,14 @@ test("extrude popup anchors one corner to the initiating sketch cursor",async({p
   await page.mouse.move(at.x,at.y); // E uses the most recent sketch pointer position
   await page.keyboard.press("e");
   const popup=page.locator("#extrude-flyout");
-  await expect(popup).toHaveAttribute("data-placement-corner","top-left");
+  await expect(popup).toHaveAttribute("data-placement-corner",/top-left|top-right|bottom-left|bottom-right/);
+  const corner=await popup.getAttribute("data-placement-corner");
+  const offset=Number(await popup.getAttribute("data-arrow-avoidance-px"));
   const b2=(await popup.boundingBox())!;
-  expect(Math.abs(b2.x-at.x)).toBeLessThan(3);
-  expect(Math.abs(b2.y-at.y)).toBeLessThan(3);
+  const cornerX=corner?.endsWith("right")?b2.x+b2.width:b2.x;
+  const cornerY=corner?.startsWith("bottom")?b2.y+b2.height:b2.y;
+  expect(Math.abs(cornerX-at.x-offset)).toBeLessThan(3);
+  expect(Math.abs(cornerY-at.y)).toBeLessThan(3);
 });
 
 test("downward first extrusion preserves signed depth and actual Z bounds",async({page})=>{

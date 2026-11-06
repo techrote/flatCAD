@@ -56,6 +56,7 @@ export class Preview {
         this.orbit.update();
         this.container.dataset.cameraPosition=this.camera.position.toArray().join(",");
         this.container.dataset.cameraTarget=this.orbit.target.toArray().join(",");
+        this.container.dataset.cameraOffset=this.camera.position.clone().sub(this.orbit.target).toArray().join(",");
         return;
       }
       // Left mouse click picks a committed horizontal B-rep face if a numeric

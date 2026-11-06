@@ -41,12 +41,22 @@ export function placeExtrudeMenu(args:{
     // Caller receives the exact cursor corner when there is room.
     return {...candidate,index,x,y,dislocation,arrowOverlap};
   });
+  // First try the mouse-anchored upper-left corner. If it covers the arrow,
+  // slide only as far as necessary sideways; preserve its vertical anchor.
+  // Other cursor corners are fallback only when that is not possible.
   for(const candidate of scored){
-    if(candidate.dislocation===0&&candidate.arrowOverlap===0)
+    if(candidate.dislocation!==0)continue;
+    if(candidate.arrowOverlap===0)
       return {x:candidate.x,y:candidate.y,corner:candidate.corner,arrowAvoidancePx:0};
+    if(!arrowRect)continue;
+    const left=arrowRect.left-p.width,right=arrowRect.right;
+    const options=[left,right]
+      .filter(x=>x>=margin&&x<=maxX)
+      .filter(x=>overlap(rect(x,candidate.y,p),arrowRect)===0)
+      .sort((a,b)=>Math.abs(a-candidate.x)-Math.abs(b-candidate.x));
+    if(options.length)return {x:options[0],y:candidate.y,
+      corner:candidate.corner,arrowAvoidancePx:options[0]-candidate.x};
   }
-  const first=scored[0],other=scored.filter(c=>c.dislocation===0&&c.arrowOverlap===0)[0];
-  if(other)return {x:other.x,y:other.y,corner:other.corner,arrowAvoidancePx:0};
   const chosen=scored.sort((a,b)=>(a.dislocation+a.arrowOverlap*1000+a.index*.01)-
                                        (b.dislocation+b.arrowOverlap*1000+b.index*.01))[0];
   let x=chosen.x,y=chosen.y,offset=0;
