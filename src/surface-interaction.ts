@@ -20,6 +20,17 @@ export function featureForSurface(
 ):Feature|null{
   const [x,y,z]=target.point;
   const profiles=new Map(doc.profiles.map(p=>[p.id,p]));
+  // Never infer a material surface inside the open interior of an existing
+  // cutting tool. The UI picks actual rendered faces; this additional guard
+  // also prevents unsafe fabricated/ambiguous provenance queries.
+  if(doc.features.some(feature=>{
+    if(feature.operation!=="cut")return false;
+    const profile=profiles.get(feature.profileId);
+    if(!profile||!contains(profile,{x,y}))return false;
+    const lo=Math.min(feature.z,feature.z+feature.depth);
+    const hi=Math.max(feature.z,feature.z+feature.depth);
+    return z>lo+tolerance&&z<hi-tolerance;
+  }))return null;
   const found:Feature[]=[];
   for(const feature of doc.features){
     const p=profiles.get(feature.profileId);if(!p)continue;
