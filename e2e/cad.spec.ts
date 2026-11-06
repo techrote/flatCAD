@@ -206,7 +206,7 @@ test("Ctrl+click adds two holes to selection; E applies two cuts atomically",asy
   await expect(page.locator("#extrude-mode option").first()).toHaveText(/Auto.*Cut/);
   await expect(page.locator("#extrude-through")).toBeChecked();
   await expect(page.locator("#preview")).toHaveAttribute("data-preview-state","ready",{timeout:120000});
-  const before=await saveProject(page);
+  const before=await page.evaluate(()=>JSON.parse(localStorage.getItem("flatcad.project.v1")!));
   expect(before.features).toHaveLength(3); // preview is never committed
   await page.locator("#apply-extrude").click();
   await expect(page.locator("#status")).toContainText("Exact solid generated");
@@ -230,13 +230,14 @@ test("major-grid flyout offset and optional exact-solid preview do not alter sav
   await expect(page.locator("#solid-preview-status")).toContainText("NOT APPLIED");
   const provisional=Number(await page.locator("#preview").getAttribute("data-preview-volume-mm3"));
   expect(provisional).toBeGreaterThan(0);
-  const before=await saveProject(page);
+  const before=await page.evaluate(()=>JSON.parse(localStorage.getItem("flatcad.project.v1")!));
   expect(before.features).toHaveLength(0);
   await page.locator("#extrude-preview").uncheck();
   await expect(page.locator("#solid-preview-status")).toBeHidden();
   await expect(page.locator("#preview")).not.toHaveAttribute("data-preview-state",/./);
   await page.locator("#cancel-extrude").click();
-  expect((await saveProject(page)).features).toHaveLength(0);
+  const after=await page.evaluate(()=>JSON.parse(localStorage.getItem("flatcad.project.v1")!));
+  expect(after.features).toHaveLength(0);
 });
 
 test("dragging the extrusion arrow changes proposed depth and 3D volume before Apply",async({page})=>{
@@ -257,5 +258,6 @@ test("dragging the extrusion arrow changes proposed depth and 3D volume before A
   await expect(page.locator("#preview")).toHaveAttribute("data-preview-state","ready",{timeout:120000});
   const revisedVolume=Number(await page.locator("#preview").getAttribute("data-preview-volume-mm3"));
   expect(revisedVolume).toBeGreaterThan(originalVolume);
-  expect((await saveProject(page)).features).toHaveLength(0);
+  const untouched=await page.evaluate(()=>JSON.parse(localStorage.getItem("flatcad.project.v1")!));
+  expect(untouched.features).toHaveLength(0);
 });
