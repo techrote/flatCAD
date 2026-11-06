@@ -285,15 +285,22 @@ function render(): void {
 function scheduleBuild(): void {
   const generation = ++buildGeneration;
   if (buildTimer !== undefined) clearTimeout(buildTimer);
+  delete byId("status").dataset.volumeMm3;
+  delete byId("status").dataset.boundsMm;
   setStatus(cad.features.length ? "Regenerating exact solid…" : "Sketch ready · add an extrusion");
   const snapshot = cad;
   buildTimer = setTimeout(async () => {
     try {
-      const mesh = await kernel.build(snapshot);
+      const result = await kernel.build(snapshot);
       if (generation !== buildGeneration) return;
-      preview?.setMesh(mesh);
-      setStatus(mesh
-        ? "Exact solid generated · " + (mesh.triangles.length / 3).toLocaleString() + " preview triangles"
+      preview?.setMesh(result.mesh);
+      if (result.statistics) {
+        byId("status").dataset.volumeMm3 = String(result.statistics.volumeMm3);
+        byId("status").dataset.boundsMm = JSON.stringify(result.statistics.boundsMm);
+      }
+      setStatus(result.mesh
+        ? "Exact solid generated · " + result.statistics?.volumeMm3.toFixed(3) + " mm³ · " +
+          (result.mesh.triangles.length / 3).toLocaleString() + " preview triangles"
         : "Sketch ready · add an extrusion");
     } catch (error) {
       if (generation !== buildGeneration) return;

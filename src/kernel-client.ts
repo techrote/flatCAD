@@ -1,5 +1,5 @@
 import type { CadDocument } from "./model";
-import type { GeometryMesh, KernelAction, KernelRequest, KernelResponse } from "./kernel-protocol";
+import type { KernelBuild, KernelAction, KernelRequest, KernelResponse } from "./kernel-protocol";
 
 type Pending = { resolve: (value: any) => void; reject: (error: Error) => void };
 
@@ -14,7 +14,7 @@ export class KernelClient {
       if (!entry) return;
       this.pending.delete(data.id);
       if (!data.ok) entry.reject(new Error(data.message));
-      else entry.resolve(data.action === "build" ? data.mesh : data.blob);
+      else entry.resolve(data.action === "build" ? { mesh: data.mesh, statistics: data.statistics } : data.blob);
     };
     this.worker.onerror = event => {
       const error = new Error(event.message || "CAD worker failed");
@@ -32,7 +32,7 @@ export class KernelClient {
     });
   }
 
-  build(document: CadDocument): Promise<GeometryMesh | null> {
+  build(document: CadDocument): Promise<KernelBuild> {
     return this.request("build", document);
   }
 

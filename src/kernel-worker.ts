@@ -1,9 +1,9 @@
 /// <reference lib="webworker" />
 import opencascade from "replicad-opencascadejs";
 import wasmUrl from "replicad-opencascadejs/wasm?url";
-import { setOC, sketchRectangle, sketchCircle, type Shape3D } from "replicad";
+import { setOC, sketchRectangle, sketchCircle, measureVolume, type Shape3D } from "replicad";
 import { validateDocument, type Feature, type Profile } from "./model";
-import type { KernelRequest, KernelResponse, GeometryMesh } from "./kernel-protocol";
+import type { KernelRequest, KernelResponse, GeometryMesh, KernelStatistics } from "./kernel-protocol";
 
 const worker = self as DedicatedWorkerGlobalScope;
 let initializePromise: Promise<void> | null = null;
@@ -67,7 +67,7 @@ async function handle(request: KernelRequest): Promise<void> {
     const document = validateDocument(request.document);
     if (!document.features.length) {
       if (request.action === "step") throw new Error("Add an extrusion before exporting STEP");
-      worker.postMessage({ id: request.id, ok: true, action: "build", mesh: null } satisfies KernelResponse);
+      worker.postMessage({ id: request.id, ok: true, action: "build", mesh: null, statistics: null } satisfies KernelResponse);
       return;
     }
     await initialize();
@@ -79,6 +79,14 @@ async function handle(request: KernelRequest): Promise<void> {
         worker.postMessage({ id: request.id, ok: true, action: "step", blob } satisfies KernelResponse);
         return;
       }
+      const volumeMm3 = measureVolume(solid);
+      const bbox = solid.boundingBox;
+      const boundsMm = bbox.bounds;
+      bbox.delete();
+      if (!Number.isFinite(volumeMm3) || volumeMm3 <= 0) {
+        throw new Error("B-rep solid has invalid or zero volume");
+      }
+      const statistics: KernelStatistics = { volumeMm3, boundsMm };
       const faces = solid.mesh({ tolerance: 0.08, angularTolerance: 0.2 });
       const edges = solid.meshEdges({ tolerance: 0.08, angularTolerance: 0.2 });
       const mesh: GeometryMesh = {
@@ -87,7 +95,7 @@ async function handle(request: KernelRequest): Promise<void> {
         normals: faces.normals,
         edgeLines: edges.lines
       };
-      worker.postMessage({ id: request.id, ok: true, action: "build", mesh } satisfies KernelResponse);
+      worker.postMessage({ id: request.id, ok: true, action: "build", mesh, statistics } satisfies KernelResponse);
     } finally {
       solid.delete();
     }
