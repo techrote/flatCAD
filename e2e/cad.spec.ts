@@ -189,3 +189,73 @@ test("L closes a multi-vertex outline by clicking its first vertex, then E extru
   data=await saveProject(page);
   expect(data.features).toHaveLength(1);
 });
+
+
+test("Ctrl+click adds two holes to selection; E applies two cuts atomically",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const b=(await page.locator("#sketch").boundingBox())!;
+  const cy=b.y+b.height/2;
+  await page.keyboard.down("Control");
+  await page.mouse.click(b.x+b.width/2-35*4,cy);
+  await page.mouse.click(b.x+b.width/2+35*4,cy);
+  await page.keyboard.up("Control");
+  await expect(page.locator("#selection-count")).toHaveText("2 selected");
+  await page.keyboard.press("e");
+  await expect(page.locator("#extrude-target")).toHaveText("2 profiles selected");
+  await expect(page.locator("#extrude-mode option").first()).toHaveText(/Auto.*Cut/);
+  await expect(page.locator("#extrude-through")).toBeChecked();
+  await expect(page.locator("#preview")).toHaveAttribute("data-preview-state","ready",{timeout:120000});
+  const before=await saveProject(page);
+  expect(before.features).toHaveLength(3); // preview is never committed
+  await page.locator("#apply-extrude").click();
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const after=await saveProject(page);
+  expect(after.features).toHaveLength(5);
+  expect(after.features.slice(-2).map((f:{operation:string})=>f.operation)).toEqual(["cut","cut"]);
+  await page.keyboard.press("Control+z");
+  await expect(page.locator("#feature-count")).toContainText("3 operations");
+});
+
+test("major-grid flyout offset and optional exact-solid preview do not alter saved features",async({page})=>{
+  await page.goto("/");await newProject(page);
+  await page.keyboard.press("r");await draw(page,[.35,.38],[.60,.64]);
+  await page.keyboard.press("e");
+  await expect(page.locator("#extrude-flyout")).toBeVisible();
+  const flyout=page.locator("#extrude-flyout");
+  await expect(flyout).toHaveAttribute("data-major-grid-pixels","100");
+  await expect(flyout).toHaveAttribute("data-placement-side",/right|left|below|above/);
+  await expect(page.locator("#extrude-preview")).toBeChecked();
+  await expect(page.locator("#preview")).toHaveAttribute("data-preview-state","ready",{timeout:120000});
+  await expect(page.locator("#solid-preview-status")).toContainText("NOT APPLIED");
+  const provisional=Number(await page.locator("#preview").getAttribute("data-preview-volume-mm3"));
+  expect(provisional).toBeGreaterThan(0);
+  const before=await saveProject(page);
+  expect(before.features).toHaveLength(0);
+  await page.locator("#extrude-preview").uncheck();
+  await expect(page.locator("#solid-preview-status")).toBeHidden();
+  await expect(page.locator("#preview")).not.toHaveAttribute("data-preview-state",/./);
+  await page.locator("#cancel-extrude").click();
+  expect((await saveProject(page)).features).toHaveLength(0);
+});
+
+test("dragging the extrusion arrow changes proposed depth and 3D volume before Apply",async({page})=>{
+  await page.goto("/");await newProject(page);
+  await page.keyboard.press("r");await draw(page,[.36,.40],[.57,.59]);
+  const draft=(await saveProject(page)).profiles[0];
+  await page.keyboard.press("e");
+  await expect(page.locator("#preview")).toHaveAttribute("data-preview-state","ready",{timeout:120000});
+  const originalVolume=Number(await page.locator("#preview").getAttribute("data-preview-volume-mm3"));
+  const b=(await page.locator("#sketch").boundingBox())!;
+  const px=b.x+b.width/2+(draft.x+draft.width/2)*4+22;
+  const py=b.y+b.height/2-(draft.y+draft.height/2)*4-35;
+  await page.mouse.move(px,py);
+  await page.mouse.down();
+  await page.mouse.move(px,py-40,{steps:7});
+  await page.mouse.up();
+  expect(Number(await page.locator("#extrude-depth").inputValue())).toBeGreaterThan(8);
+  await expect(page.locator("#preview")).toHaveAttribute("data-preview-state","ready",{timeout:120000});
+  const revisedVolume=Number(await page.locator("#preview").getAttribute("data-preview-volume-mm3"));
+  expect(revisedVolume).toBeGreaterThan(originalVolume);
+  expect((await saveProject(page)).features).toHaveLength(0);
+});
