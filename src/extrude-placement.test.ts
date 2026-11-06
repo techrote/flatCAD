@@ -16,6 +16,18 @@ describe("cursor-corner extrusion flyout",()=>{
     expect(Number.isFinite(p.x)).toBe(true);
     expect(p.x).toBeGreaterThanOrEqual(8);
   });
+  it("keeps preferred cursor corner by sliding away from arrow on a short viewport",()=>{
+    const cursor={x:210,y:45};
+    const p=placeExtrudeMenu({
+      viewport:{width:780,height:510},
+      popup:{width:258,height:459},
+      cursor,arrow:{x:421,y:234}
+    });
+    expect(p.corner).toBe("top-left");
+    expect(p.x).toBeLessThan(cursor.x);
+    expect(Math.abs((p.x-cursor.x)-p.arrowAvoidancePx)).toBeLessThan(1e-8);
+    expect(Math.abs(p.y-cursor.y)).toBeLessThanOrEqual(3);
+  });
   it("changes nothing when the arrow is elsewhere",()=>{
     const p=placeExtrudeMenu({viewport,popup,cursor:{x:190,y:80},arrow:{x:700,y:600}});
     expect(p.x).toBe(190);expect(p.y).toBe(80);
