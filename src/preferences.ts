@@ -29,6 +29,7 @@ export type Preferences={
   grid:{tiers:[GridTier,GridTier,GridTier],snapGeometry:boolean};
   polygon:{sides:number,rotation:number};
   navigation: NavigationPreset;
+  rememberSurfaces:boolean;
 };
 const defaultLayers: [GridTier,GridTier,GridTier]=[
   {label:"Fine",enabled:true,spacing:1,color:"#1b3045",snap:false},
@@ -38,7 +39,7 @@ const defaultLayers: [GridTier,GridTier,GridTier]=[
 export function defaultPreferences():Preferences {
   return {version:1,shortcuts:{...DEFAULT_SHORTCUTS},
     grid:{tiers:defaultLayers.map(x=>({...x})) as [GridTier,GridTier,GridTier],snapGeometry:true},
-    polygon:{sides:6,rotation:-90},navigation:"fusion"};
+    polygon:{sides:6,rotation:-90},navigation:"fusion",rememberSurfaces:true};
 }
 const codes=/^(?:(?:Control|Alt|Shift|Meta)\+)*(?:Key[A-Z]|Digit[0-9]|Arrow(?:Up|Down|Left|Right)|Space|Escape|Delete|Backspace|Enter|Tab|F(?:[1-9]|1[0-2]))$/;
 const allowedActions=Object.keys(ACTION_LABELS) as ShortcutAction[];
@@ -90,8 +91,11 @@ export function validatePreferences(source:unknown):Preferences {
     Math.abs(source.polygon.rotation)>36000)throw new Error("Invalid polygon defaults");
   const navigation=source.navigation===undefined?"fusion":source.navigation;
   if(!validNavigationPreset(navigation))throw new Error("Unknown CAD navigation preset");
+  const rememberSurfaces=source.rememberSurfaces===undefined?true:source.rememberSurfaces;
+  if(typeof rememberSurfaces!=="boolean")throw new Error("Invalid remember-surfaces preference");
   return {version:1,shortcuts,grid:{tiers,snapGeometry:source.grid.snapGeometry},
-    polygon:{sides:source.polygon.sides as number,rotation:source.polygon.rotation},navigation};
+    polygon:{sides:source.polygon.sides as number,rotation:source.polygon.rotation},
+    navigation,rememberSurfaces};
 }
 export const PREFS_KEY="flatcad.preferences.v1";
 export function loadPreferences():Preferences {

@@ -38,3 +38,16 @@ describe("CAD control settings migration",()=>{
     expect(()=>validatePreferences({...prefs,navigation:"malicious"})).toThrow("Unknown CAD navigation preset");
   });
 });
+
+describe("remember interaction surfaces preference",()=>{
+  it("defaults on and migrates old preference JSON",()=>{
+    const current=defaultPreferences();
+    expect(current.rememberSurfaces).toBe(true);
+    const old={...current};delete (old as Partial<typeof old>).rememberSurfaces;
+    expect(validatePreferences(old).rememberSurfaces).toBe(true);
+  });
+  it("permits opt-out and rejects malformed settings",()=>{
+    expect(validatePreferences({...defaultPreferences(),rememberSurfaces:false}).rememberSurfaces).toBe(false);
+    expect(()=>validatePreferences({...defaultPreferences(),rememberSurfaces:"yes"})).toThrow();
+  });
+});
