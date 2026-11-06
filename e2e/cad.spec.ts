@@ -458,3 +458,82 @@ test("negative pocket with face-picked start plane creates precise partial-depth
   expect(native.features.at(-1).z).toBe(8);
   expect(native.features.at(-1).depth).toBe(-6);
 });
+
+
+test("Solid hover highlights a face and shows a contextual mouse-target label",async({page})=>{
+  await page.goto("/");await newProject(page);
+  await page.keyboard.press("r");await draw(page,[.32,.35],[.68,.65]);
+  await page.keyboard.press("e");await page.locator("#apply-extrude").click();
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const b=(await page.locator("#preview canvas").boundingBox())!;
+  await page.mouse.move(b.x+b.width*.5,b.y+b.height*.5);
+  await expect(page.locator("#face-target-label")).toBeVisible();
+  await expect(page.locator("#preview")).toHaveAttribute("data-hovered-face-z","8");
+  await expect(page.locator("#preview")).toHaveAttribute("data-highlight-triangle-count",/^[1-9]\d*$/);
+  await expect(page.locator("#face-target-label")).toContainText(/Face|Vertex/);
+  await page.mouse.move(b.x-15,b.y-15);
+  await expect(page.locator("#face-target-label")).toBeHidden();
+});
+
+test("Remember mouse surfaces defaults ON and prefills Start Z after a committed face click",async({page})=>{
+  await page.goto("/");await newProject(page);
+  await page.keyboard.press("r");await draw(page,[.32,.36],[.68,.65]);
+  await page.keyboard.press("e");await page.locator("#apply-extrude").click();
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const b=(await page.locator("#preview canvas").boundingBox())!;
+  await page.mouse.click(b.x+b.width*.5,b.y+b.height*.5);
+  await page.keyboard.press("c");await draw(page,[.5,.5],[.54,.5]);
+  await page.keyboard.press("e");
+  await expect(page.locator("#extrude-z")).toHaveValue("8");
+  await openMenu(page,"settings","dialog.navigation");
+  await expect(page.locator("#remember-surfaces")).toBeChecked();
+  await page.locator("#remember-surfaces").uncheck();
+  await page.locator('[data-close="navigation-dialog"]').last().click();
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem("flatcad.preferences.v1")!).rememberSurfaces))
+    .toBe(false);
+});
+
+test("Short right click on committed horizontal face exposes latch and safe Delete Feature",async({page})=>{
+  await page.goto("/");await newProject(page);
+  await page.keyboard.press("r");await draw(page,[.32,.35],[.68,.65]);
+  await page.keyboard.press("e");await page.locator("#apply-extrude").click();
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const b=(await page.locator("#preview canvas").boundingBox())!;
+  const x=b.x+b.width*.5,y=b.y+b.height*.5;
+  await page.mouse.click(x,y,{button:"right"});
+  await expect(page.locator("#face-context-menu")).toBeVisible();
+  await expect(page.locator('[data-face-action="Delete Feature"]')).toBeEnabled();
+  await expect(page.locator('[data-face-action="Latch Start Z"]')).toBeEnabled();
+  await page.locator('[data-face-action="Latch Start Z"]').click();
+  await expect(page.locator("#extrude-z")).toHaveValue("8");
+  await page.mouse.click(x,y,{button:"right"});
+  await expect(page.locator("#face-context-menu")).toBeVisible();
+  await page.locator('[data-face-action="Delete Feature"]').click();
+  await expect(page.locator("#feature-count")).toContainText("0 operations");
+  await page.keyboard.press("Control+z");
+  await expect(page.locator("#feature-count")).toContainText("1 operations");
+});
+
+test("Cut preview shows translucent red full tool, overshoot and distinct removed volume",async({page})=>{
+  await page.goto("/");await newProject(page);
+  await page.keyboard.press("r");await draw(page,[.32,.35],[.68,.65]);
+  await page.keyboard.press("e");await page.locator("#apply-extrude").click();
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await page.keyboard.press("c");await draw(page,[.50,.50],[.54,.50]);
+  await page.keyboard.press("e");
+  await expect(page.locator("#preview")).toHaveAttribute("data-preview-state","ready",{timeout:120000});
+  await expect(page.locator("#preview")).toHaveAttribute("data-cut-tool-visible","true");
+  await expect(page.locator("#cut-tool-metrics")).toBeVisible();
+  const full=Number(await page.locator("#preview").getAttribute("data-cut-tool-volume-mm3"));
+  const removed=Number(await page.locator("#preview").getAttribute("data-cut-removed-volume-mm3"));
+  const cutBounds=JSON.parse((await page.locator("#preview").getAttribute("data-cut-tool-bounds-mm"))!);
+  expect(full).toBeGreaterThan(removed);
+  expect(removed).toBeGreaterThan(0);
+  expect(cutBounds[0][2]).toBeLessThan(0);
+  expect(cutBounds[1][2]).toBeGreaterThan(8);
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem("flatcad.project.v1")!).features.length))
+    .toBe(1);
+  await page.locator("#extrude-preview").uncheck();
+  await expect(page.locator("#cut-tool-metrics")).toBeHidden();
+  await expect(page.locator("#preview")).not.toHaveAttribute("data-cut-tool-visible",/./);
+});
