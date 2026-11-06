@@ -218,14 +218,14 @@ test("Ctrl+click adds two holes to selection; E applies two cuts atomically",asy
   await expect(page.locator("#feature-count")).toContainText("3 operations");
 });
 
-test("major-grid flyout offset and optional exact-solid preview do not alter saved features",async({page})=>{
+test("cursor-anchored flyout and optional exact-solid preview do not alter saved features",async({page})=>{
   await page.goto("/");await newProject(page);
   await page.keyboard.press("r");await draw(page,[.35,.38],[.60,.64]);
   await page.keyboard.press("e");
   await expect(page.locator("#extrude-flyout")).toBeVisible();
   const flyout=page.locator("#extrude-flyout");
-  await expect(flyout).toHaveAttribute("data-major-grid-pixels","100");
-  await expect(flyout).toHaveAttribute("data-placement-side",/right|left|below|above/);
+  await expect(flyout).toHaveAttribute("data-placement-corner",/top-left|top-right|bottom-left|bottom-right/);
+  await expect(flyout).not.toHaveAttribute("data-major-grid-pixels",/./);
   await expect(page.locator("#extrude-preview")).toBeChecked();
   await expect(page.locator("#preview")).toHaveAttribute("data-preview-state","ready",{timeout:120000});
   await expect(page.locator("#solid-preview-status")).toContainText("NOT APPLIED");
@@ -291,7 +291,7 @@ test("Ctrl-selected profiles move, duplicate and delete as a group in atomic his
   await expect(page.locator("#profile-count")).toContainText("5 profiles");
 });
 
-test("extrusion flyout offset follows a modified major-grid spacing",async({page})=>{
+test("cursor placement is independent of major-grid spacing",async({page})=>{
   await page.goto("/");
   await page.keyboard.press("g");
   await expect(page.locator("#grid-dialog")).toBeVisible();
@@ -303,5 +303,104 @@ test("extrusion flyout offset follows a modified major-grid spacing",async({page
   await draw(page,[.35,.38],[.56,.60]);
   await page.keyboard.press("e");
   await expect(page.locator("#extrude-flyout")).toBeVisible();
-  await expect(page.locator("#extrude-flyout")).toHaveAttribute("data-major-grid-pixels","48");
+  await expect(page.locator("#extrude-flyout")).toHaveAttribute(
+    "data-placement-corner",/top-left|top-right|bottom-left|bottom-right/);
+  await expect(page.locator("#extrude-flyout")).not.toHaveAttribute("data-major-grid-pixels",/./);
+});
+
+
+test("Fusion is default; navigation presets can be selected and saved",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#preview")).toHaveAttribute("data-navigation-preset","fusion");
+  await openMenu(page,"settings","dialog.navigation");
+  await expect(page.locator("#navigation-dialog")).toBeVisible();
+  await expect(page.locator("#navigation-preset")).toHaveValue("fusion");
+  await expect(page.locator("#navigation-preset option")).toHaveCount(4);
+  await page.locator("#navigation-preset").selectOption("solidworks");
+  await expect(page.locator("#preview")).toHaveAttribute("data-navigation-preset","solidworks");
+  await page.locator('[data-close="navigation-dialog"]').last().click();
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem("flatcad.preferences.v1")!).navigation))
+    .toBe("solidworks");
+  await page.reload();
+  await expect(page.locator("#preview")).toHaveAttribute("data-navigation-preset","solidworks");
+});
+
+test("Fusion mouse: MMB drag pans and Shift+MMB drag orbits",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const b=(await page.locator("#preview canvas").boundingBox())!;
+  const x=b.x+b.width/2,y=b.y+b.height/2;
+  await page.mouse.move(x,y);
+  await page.mouse.down({button:"middle"});
+  await page.mouse.move(x+55,y+35,{steps:7});
+  await page.mouse.up({button:"middle"});
+  await expect(page.locator("#preview")).toHaveAttribute("data-last-navigation-action","pan");
+  const panTarget=await page.locator("#preview").getAttribute("data-camera-target");
+  await page.keyboard.down("Shift");
+  await page.mouse.move(x,y);
+  await page.mouse.down({button:"middle"});
+  await page.mouse.move(x+60,y+30,{steps:7});
+  await page.mouse.up({button:"middle"});
+  await page.keyboard.up("Shift");
+  await expect(page.locator("#preview")).toHaveAttribute("data-last-navigation-action","orbit");
+  const orbitTarget=await page.locator("#preview").getAttribute("data-camera-target");
+  expect(panTarget).not.toBeNull();
+  expect(orbitTarget).toBe(panTarget);
+});
+
+test("extrude popup anchors one corner to the initiating sketch cursor",async({page})=>{
+  await page.goto("/");await newProject(page);
+  await page.keyboard.press("r");await draw(page,[.43,.46],[.60,.63]);
+  const b=(await page.locator("#sketch").boundingBox())!;
+  const at={x:b.x+210,y:b.y+45};
+  await page.mouse.move(at.x,at.y); // E uses the most recent sketch pointer position
+  await page.keyboard.press("e");
+  const popup=page.locator("#extrude-flyout");
+  await expect(popup).toHaveAttribute("data-placement-corner","top-left");
+  const b2=(await popup.boundingBox())!;
+  expect(Math.abs(b2.x-at.x)).toBeLessThan(3);
+  expect(Math.abs(b2.y-at.y)).toBeLessThan(3);
+});
+
+test("downward first extrusion preserves signed depth and actual Z bounds",async({page})=>{
+  await page.goto("/");await newProject(page);
+  await page.keyboard.press("r");await draw(page,[.35,.39],[.58,.62]);
+  await page.keyboard.press("e");
+  await page.locator("#extrude-z").fill("8");
+  await page.locator("#extrude-depth").fill("-6");
+  await expect(page.locator("#extrude-z")).toHaveValue("8");
+  await expect(page.locator("#preview")).toHaveAttribute("data-preview-state","ready",{timeout:120000});
+  await page.locator("#apply-extrude").click();
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const bounds=JSON.parse((await page.locator("#status").getAttribute("data-bounds-mm"))!);
+  expect(bounds[0][2]).toBeCloseTo(2,5);
+  expect(bounds[1][2]).toBeCloseTo(8,5);
+  const saved=await saveProject(page);
+  expect(saved.features[0].z).toBe(8);
+  expect(saved.features[0].depth).toBe(-6);
+});
+
+test("negative pocket with face-picked start plane creates precise partial-depth cut",async({page})=>{
+  await page.goto("/");await newProject(page);
+  await page.keyboard.press("r");await draw(page,[.32,.35],[.68,.65]);
+  await page.keyboard.press("e");
+  await page.locator("#apply-extrude").click();
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const before=Number(await page.locator("#status").getAttribute("data-volume-mm3"));
+  await page.keyboard.press("c");await draw(page,[.50,.50],[.54,.50]);
+  await page.keyboard.press("e");
+  await page.locator("#extrude-z").click();
+  const b=(await page.locator("#preview canvas").boundingBox())!;
+  await page.mouse.click(b.x+b.width/2,b.y+b.height/2);
+  await expect(page.locator("#extrude-z")).toHaveValue("8",{timeout:10000});
+  await expect(page.locator("#preview")).toHaveAttribute("data-last-picked-face-z","8");
+  await page.locator("#extrude-depth").fill("-6");
+  await expect(page.locator("#extrude-z")).toHaveValue("8");
+  await page.locator("#apply-extrude").click();
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const after=Number(await page.locator("#status").getAttribute("data-volume-mm3"));
+  expect(after).toBeLessThan(before);
+  const native=await saveProject(page);
+  expect(native.features.at(-1).z).toBe(8);
+  expect(native.features.at(-1).depth).toBe(-6);
 });

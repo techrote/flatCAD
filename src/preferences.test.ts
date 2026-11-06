@@ -24,3 +24,17 @@ describe("configurable keyboard and three-tier grid",()=>{
     expect(()=>validatePreferences(s)).toThrow("Invalid grid");
   });
 });
+
+describe("CAD control settings migration",()=>{
+  it("defaults to Fusion and preserves imported legacy JSON without navigation",()=>{
+    const defaults=defaultPreferences();
+    expect(defaults.navigation).toBe("fusion");
+    const legacy={...defaults};delete (legacy as Partial<typeof legacy>).navigation;
+    expect(validatePreferences(legacy).navigation).toBe("fusion");
+  });
+  it("round trips another navigation preset and rejects unknown identifiers",()=>{
+    const prefs={...defaultPreferences(),navigation:"blender" as const};
+    expect(validatePreferences(JSON.parse(JSON.stringify(prefs))).navigation).toBe("blender");
+    expect(()=>validatePreferences({...prefs,navigation:"malicious"})).toThrow("Unknown CAD navigation preset");
+  });
+});
