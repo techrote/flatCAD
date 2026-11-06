@@ -48,7 +48,7 @@ function makeSolid(document: ReturnType<typeof validateDocument>): Shape3D | nul
         continue;
       }
       try {
-        const next = feature.operation === "add" ? result.fuse(tool) : result.cut(tool);
+        const next: Shape3D = feature.operation === "add" ? result.fuse(tool) : result.cut(tool);
         result.delete();
         result = next;
       } finally {
