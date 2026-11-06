@@ -206,8 +206,9 @@ test("Ctrl+click adds two holes to selection; E applies two cuts atomically",asy
   await expect(page.locator("#extrude-mode option").first()).toHaveText(/Auto.*Cut/);
   await expect(page.locator("#extrude-through")).toBeChecked();
   await expect(page.locator("#preview")).toHaveAttribute("data-preview-state","ready",{timeout:120000});
-  const before=await page.evaluate(()=>JSON.parse(localStorage.getItem("flatcad.project.v1")!));
-  expect(before.features).toHaveLength(3); // preview is never committed
+  await expect(page.locator("#feature-count")).toContainText("3 operations");
+  // Opening and previewing the untouched built-in demo does not persist a new project.
+  expect(await page.evaluate(()=>localStorage.getItem("flatcad.project.v1"))).toBeNull();
   await page.locator("#apply-extrude").click();
   await expect(page.locator("#status")).toContainText("Exact solid generated");
   const after=await saveProject(page);
