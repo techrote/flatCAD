@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { GeometryMesh } from "./kernel-protocol";
-import { dragAction, type NavigationPreset } from "./navigation";
+import { dragAction, orbitControlsBinding, type NavigationPreset } from "./navigation";
 import { exactFaceElevation } from "./signed-extrusion";
 
 /** OpenCascade B-rep-derived display; face picking references COMMITTED geometry only. */
@@ -43,8 +43,19 @@ export class Preview {
         shift: event.shiftKey, ctrl: event.ctrlKey || event.metaKey,
       });
       this.pointerDown = { x:event.clientX,y:event.clientY,button:event.button,action };
-      if(event.button===1) this.orbit.mouseButtons.MIDDLE = this.toMouseAction(action);
-      if(event.button===2) this.orbit.mouseButtons.RIGHT = this.toMouseAction(action);
+      // Actual camera snapshots, not only the requested action, allow tests
+      // to distinguish pan (fixed camera offset) from orbit (changed offset).
+      this.orbit.update();
+      this.container.dataset.cameraOffsetBefore=
+        this.camera.position.clone().sub(this.orbit.target).toArray().join(",");
+      this.container.dataset.cameraTargetBefore=this.orbit.target.toArray().join(",");
+      // OrbitControls internally reverses PAN/ROTATE when a modifier is down.
+      // Counter-swap here so Shift+MMB truly orbits rather than merely
+      // reporting the word "orbit" while panning in the actual renderer.
+      const modifier=event.shiftKey||event.ctrlKey||event.metaKey;
+      const binding=this.toMouseAction(orbitControlsBinding(action,modifier));
+      if(event.button===1) this.orbit.mouseButtons.MIDDLE=binding;
+      if(event.button===2) this.orbit.mouseButtons.RIGHT=binding;
     }, {capture:true});
     surface.addEventListener("pointerup", event => {
       const start=this.pointerDown;

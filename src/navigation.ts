@@ -9,7 +9,7 @@ export const NAVIGATION_LABELS: Record<NavigationPreset,string> = {
   blender:"Blender",
 };
 export const NAVIGATION_HINTS: Record<NavigationPreset,string> = {
-  fusion:"MMB pan · Shift+MMB orbit · wheel zoom",
+  fusion:"MMB pan · Shift+MMB orbit · RMB orbit · wheel zoom",
   solidworks:"MMB orbit · Ctrl+MMB pan · Shift+MMB zoom",
   onshape:"RMB orbit · MMB/Ctrl+RMB pan · wheel zoom",
   blender:"MMB orbit · Shift+MMB pan · wheel zoom",
@@ -23,6 +23,7 @@ export function dragAction(
 ):DragAction {
   if(preset==="fusion"){
     if(button===1)return modifiers.shift?"orbit":"pan";
+    if(button===2)return "orbit";
     return "none";
   }
   if(preset==="solidworks"){
@@ -36,4 +37,20 @@ export function dragAction(
   }
   if(button===1)return modifiers.shift?"pan":"orbit"; // Blender
   return "none";
+}
+
+/**
+ * Three.js OrbitControls r180 swaps ROTATE⇄PAN when Ctrl, Meta or Shift
+ * is held. Mapping the requested action directly to mouseButtons therefore
+ * does the OPPOSITE for modified drags. Choose the compensating binding here
+ * before OrbitControls receives pointerdown. Dolly is not swapped.
+ *
+ * This is explicitly an OrbitControls adapter, not a CAD control preset:
+ * dragAction() remains the authoritative desired interaction.
+ */
+export function orbitControlsBinding(desired:DragAction,modified:boolean):DragAction{
+  if(!modified)return desired;
+  if(desired==="orbit")return "pan";
+  if(desired==="pan")return "orbit";
+  return desired;
 }

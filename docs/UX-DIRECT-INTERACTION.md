@@ -117,3 +117,9 @@ The feature document stores Start Z and a *signed* Depth; both are physical mm. 
 All presets reserve left-click to pick rather than rotate. A normal scroll wheel zoom remains enabled; compatibility remains subject to human Windows/Firefox verification. Reference controls: https://help.autodesk.com/view/fusion360/ENU/?contextId=GS-SET-PREFERENCES , https://help.solidworks.com/2021/english/SolidWorks/sldworks/r_Middle_Mouse_Button.htm , https://cad.onshape.com/help/Content/View/view_navigation_and_the_view_cube.htm .
 
 **Acceptance:** browser-test cursor anchoring (including sketch-overlap and handle avoidance), negative-depth exact bounds and volume, face-pick autofill of Start Z and signed Depth, mouse navigation modifiers, settings migration and persistence, and preview cancel with no native-document changes. Do not report full 3D geometry selection: only horizontal B-rep-derived face elevation picking is implemented.
+
+## NAV-002 (2026-11-06): actual Fusion mouse navigation repair
+
+Fusion: middle mouse drag pans; Shift+middle mouse drag orbits; right mouse drag orbits; wheel zooms. The earlier input mapping only *reported* orbit on Shift+middle drag. Three.js OrbitControls r180 reverses mouse ROTATE/PAN when Ctrl/Meta/Shift is held; the new adapter counter-swaps mouse bindings in a capture-phase pointerdown listener. This is applied consistently for all supported CAD navigation presets.
+
+Acceptance requires measuring actual changes to the camera-target translation and camera-to-target offset (not merely a reported action string). Right-click short-press remains reserved for later context-menu work under UX-FACE-002; right-drag must not trigger that menu.

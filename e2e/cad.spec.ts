@@ -325,31 +325,75 @@ test("Fusion is default; navigation presets can be selected and saved",async({pa
   await expect(page.locator("#preview")).toHaveAttribute("data-navigation-preset","solidworks");
 });
 
-test("Fusion mouse: MMB drag pans and Shift+MMB drag orbits",async({page})=>{
+async function dragInSolid(
+  page:import("@playwright/test").Page,
+  button:"left"|"middle"|"right",
+  options:{shift?:boolean,ctrl?:boolean}={}
+){
+  const viewport=page.locator("#preview");
+  const rect=(await page.locator("#preview canvas").boundingBox())!;
+  const x=rect.x+rect.width*.50,y=rect.y+rect.height*.51;
+  if(options.shift)await page.keyboard.down("Shift");
+  if(options.ctrl)await page.keyboard.down("Control");
+  try{
+    await page.mouse.move(x,y);
+    await page.mouse.down({button});
+    await page.mouse.move(x+75,y+42,{steps:12});
+    await page.mouse.up({button});
+  }finally{
+    if(options.shift)await page.keyboard.up("Shift");
+    if(options.ctrl)await page.keyboard.up("Control");
+  }
+  const vec=(key:string)=>viewport.getAttribute(key).then(value=>{
+    expect(value,key).not.toBeNull();
+    return (value??"").split(",").map(Number);
+  });
+  return {
+    beforeOffset:await vec("data-camera-offset-before"),
+    afterOffset:await vec("data-camera-offset"),
+    beforeTarget:await vec("data-camera-target-before"),
+    afterTarget:await vec("data-camera-target"),
+  };
+}
+const vectorDistance=(a:number[],b:number[])=>Math.hypot(...a.map((n,i)=>n-b[i]));
+test("Fusion actual MMB pan translates camera target without orbiting",async({page})=>{
   await page.goto("/");
   await expect(page.locator("#status")).toContainText("Exact solid generated");
-  const b=(await page.locator("#preview canvas").boundingBox())!;
-  const x=b.x+b.width/2,y=b.y+b.height/2;
-  await page.mouse.move(x,y);
-  await page.mouse.down({button:"middle"});
-  await page.mouse.move(x+55,y+35,{steps:7});
-  await page.mouse.up({button:"middle"});
-  await expect(page.locator("#preview")).toHaveAttribute("data-last-navigation-action","pan");
-  const panOffset=await page.locator("#preview").getAttribute("data-camera-offset");
-  await page.keyboard.down("Shift");
-  await page.mouse.move(x,y);
-  await page.mouse.down({button:"middle"});
-  await page.mouse.move(x+60,y+30,{steps:7});
-  await page.mouse.up({button:"middle"});
-  await page.keyboard.up("Shift");
-  await expect(page.locator("#preview")).toHaveAttribute("data-last-navigation-action","orbit");
-  const orbitOffset=await page.locator("#preview").getAttribute("data-camera-offset");
-  expect(panOffset).not.toBeNull();
-  expect(orbitOffset).not.toBeNull();
-  // Orbit changes the camera direction relative to its pivot. Pan does not;
-  // damping may continue after pointer-up, so comparing absolute targets
-  // for strict equality is not a reliable navigation assertion.
-  expect(orbitOffset).not.toBe(panOffset);
+  const d=await dragInSolid(page,"middle");
+  expect(await page.locator("#preview").getAttribute("data-last-navigation-action")).toBe("pan");
+  expect(vectorDistance(d.beforeTarget,d.afterTarget)).toBeGreaterThan(.05);
+  expect(vectorDistance(d.beforeOffset,d.afterOffset)).toBeLessThan(.005);
+});
+test("Fusion actual Shift+MMB orbit changes camera direction, not target",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const d=await dragInSolid(page,"middle",{shift:true});
+  expect(await page.locator("#preview").getAttribute("data-last-navigation-action")).toBe("orbit");
+  expect(vectorDistance(d.beforeOffset,d.afterOffset)).toBeGreaterThan(.1);
+  expect(vectorDistance(d.beforeTarget,d.afterTarget)).toBeLessThan(.005);
+});
+test("Fusion actual RMB drag also orbits while a short RMB click does not",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const d=await dragInSolid(page,"right");
+  expect(await page.locator("#preview").getAttribute("data-last-navigation-action")).toBe("orbit");
+  expect(vectorDistance(d.beforeOffset,d.afterOffset)).toBeGreaterThan(.1);
+  expect(vectorDistance(d.beforeTarget,d.afterTarget)).toBeLessThan(.005);
+});
+test("SOLIDWORKS and Blender modified MMB obey their actual pan/zoom bindings",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await openMenu(page,"settings","dialog.navigation");
+  await page.locator("#navigation-preset").selectOption("blender");
+  await page.locator('[data-close="navigation-dialog"]').last().click();
+  const pan=await dragInSolid(page,"middle",{shift:true});
+  expect(vectorDistance(pan.beforeTarget,pan.afterTarget)).toBeGreaterThan(.05);
+  expect(vectorDistance(pan.beforeOffset,pan.afterOffset)).toBeLessThan(.005);
+  await openMenu(page,"settings","dialog.navigation");
+  await page.locator("#navigation-preset").selectOption("solidworks");
+  await page.locator('[data-close="navigation-dialog"]').last().click();
+  const orbit=await dragInSolid(page,"middle");
+  expect(vectorDistance(orbit.beforeOffset,orbit.afterOffset)).toBeGreaterThan(.1);
 });
 
 test("extrude popup anchors one corner to the initiating sketch cursor",async({page})=>{
