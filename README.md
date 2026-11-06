@@ -30,7 +30,11 @@ Use the rectangle or circle tools to draw profiles, select a profile, and choose
 
 **Multi-select:** Hold Ctrl (or Command on macOS) and click sketch objects to add/remove them from a selection. Click a selected object normally to drag the selected group; Ctrl+D duplicates and Delete removes the group. Press E to extrude or cut all selected closed profiles in one undoable action.
 
-**Contextual extrusion:** The E popover is positioned one **major grid** distance beyond the selected profile(s), using the currently configured major spacing and viewport zoom. A triangular arrowhead acts as the draggable depth grip. The **Preview in solid view** checkbox shows a provisional OpenCascade B-rep recomputation, tinted by Add/Cut; disabling preview or cancelling restores the committed solid. Preview operations never modify the saved project until Apply.
+**Contextual extrusion:** The E popover anchors a corner to the initiating mouse position (flipping corners at viewport edges). Sketch-outline overlap is allowed; if the popup would cover the extrusion arrow, it shifts sideways. A triangular arrowhead acts as the draggable depth grip and now supports negative depths. The **Preview in solid view** checkbox shows a provisional OpenCascade B-rep recomputation, tinted by Add/Cut; disabling preview or cancelling restores the committed solid. Preview operations never modify the saved project until Apply.
+
+**Face-driven dimensions:** While Extrude/Cut is active, focus **Start Z** or **Depth**, then click a *horizontal* face of the existing solid. Start Z becomes that face's Z elevation; Depth becomes face Z minus Start Z, so Start Z 8 and a face at Z 2 produces **−6 mm**. The face picker targets committed geometry even while optional operation preview is shown. Opposite-direction extrusion also works by typing a negative Depth directly.
+
+**CAD mouse controls:** Under Settings → CAD navigation controls choose Fusion (default: MMB pan, Shift+MMB orbit), SOLIDWORKS, Onshape or Blender. The selection persists in settings JSON; mouse wheel zoom remains available.
 
 ## Direct workflow
 

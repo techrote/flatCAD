@@ -1,52 +1,59 @@
-/** Overlay placement, in canvas-local CSS pixels. Major-grid distance is never a CSS constant. */
-export type Rectangle2 = { left: number; top: number; right: number; bottom: number };
-export type Dimensions = { width: number; height: number };
-export type Position = { x: number; y: number; side: "right" | "left" | "below" | "above" };
-const overlap = (a: Rectangle2, b: Rectangle2) =>
-  Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left)) *
-  Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
-const boxAt = (x: number, y: number, d: Dimensions): Rectangle2 =>
-  ({ left: x, top: y, right: x + d.width, bottom: y + d.height });
-
-/** Prefer exactly one major-grid interval between popover and geometry.
- *  Try the opposite sides before moving closer due to an undersized viewport.
- *  Penalize intersection with the extrusion arrow more than ordinary geometry.
- */
-export function placeExtrudeMenu(args: {
-  viewport: Dimensions; selection: Rectangle2; popup: Dimensions;
-  majorGridPixels: number; arrow?: { x: number; y: number } | null;
-}): Position {
-  const { viewport, selection: a, popup: p } = args;
-  const gap = Math.max(0, args.majorGridPixels);
-  const cx = (a.left + a.right) / 2, cy = (a.top + a.bottom) / 2;
-  const candidates: Position[] = [
-    { side: "right", x: a.right + gap, y: cy - p.height / 2 },
-    { side: "left", x: a.left - gap - p.width, y: cy - p.height / 2 },
-    { side: "below", x: cx - p.width / 2, y: a.bottom + gap },
-    { side: "above", x: cx - p.width / 2, y: a.top - gap - p.height },
+/** Cursor-corner extrusion flyout; sketch geometry may overlap the popup. */
+export type Dimensions={width:number,height:number};
+export type Point={x:number,y:number};
+export type CursorCorner="top-left"|"top-right"|"bottom-left"|"bottom-right";
+export type Placement={x:number,y:number,corner:CursorCorner,arrowAvoidancePx:number};
+type Rect={left:number,top:number,right:number,bottom:number};
+function overlap(a:Rect,b:Rect):boolean{
+  return a.left<b.right && a.right>b.left && a.top<b.bottom && a.bottom>b.top;
+}
+function box(x:number,y:number,p:Dimensions):Rect{
+  return {left:x,right:x+p.width,top:y,bottom:y+p.height};
+}
+/** Prefer the upper-left mouse corner with minimal adjustment; if the panel
+ * would cover the handle, shift horizontally. On viewport edges, flip the
+ * anchored corner or clamp only as far as necessary. Never avoid sketch edges. */
+export function placeExtrudeMenu(args:{
+  viewport:Dimensions,cursor:Point,popup:Dimensions,arrow?:Point|null
+}):Placement{
+  const {viewport,cursor,popup}=args;
+  const pad=8,clearance=16;
+  const minX=pad,minY=pad,maxX=Math.max(pad,viewport.width-popup.width-pad),
+    maxY=Math.max(pad,viewport.height-popup.height-pad);
+  const clamp=(v:number,lo:number,hi:number)=>Math.max(lo,Math.min(hi,v));
+  const arrow=args.arrow?{
+    left:args.arrow.x-clearance,right:args.arrow.x+clearance,
+    top:args.arrow.y-clearance,bottom:args.arrow.y+clearance
+  }:null;
+  const possibilities:{corner:CursorCorner,x:number,y:number}[]=[
+    {corner:"top-left",x:cursor.x,y:cursor.y},
+    {corner:"top-right",x:cursor.x-popup.width,y:cursor.y},
+    {corner:"bottom-left",x:cursor.x,y:cursor.y-popup.height},
+    {corner:"bottom-right",x:cursor.x-popup.width,y:cursor.y-popup.height},
   ];
-  const padding = 10;
-  const inBounds = (pos: Position) =>
-    pos.x >= padding && pos.y >= padding &&
-    pos.x + p.width <= viewport.width - padding &&
-    pos.y + p.height <= viewport.height - padding;
-  const arrow: Rectangle2 | null = args.arrow
-    ? { left: args.arrow.x - 28, right: args.arrow.x + 50, top: args.arrow.y - 20, bottom: args.arrow.y + 20 }
-    : null;
-  const score = (pos: Position) => {
-    const rect = boxAt(pos.x, pos.y, p);
-    return overlap(rect, a) * 10 + (arrow ? overlap(rect, arrow) * 60 : 0);
-  };
-  const clean = candidates.filter(pos => inBounds(pos) && score(pos) === 0);
-  if (clean.length > 0) return clean[0];
-  const fitting = candidates.filter(inBounds).sort((x, y) => score(x) - score(y));
-  if (fitting.length > 0) return fitting[0];
-  // On a tiny canvas no candidate fits: clamp and minimize obstruction.
-  const clamped = candidates.map(c => ({
-    ...c,
-    x: Math.max(padding, Math.min(viewport.width - p.width - padding, c.x)),
-    y: Math.max(padding, Math.min(viewport.height - p.height - padding, c.y)),
-  }));
-  clamped.sort((a, b) => score(a) - score(b));
-  return clamped[0];
+  const scored=possibilities.map((candidate,index)=>{
+    let x=clamp(candidate.x,minX,maxX);
+    const y=clamp(candidate.y,minY,maxY);
+    let sideShift=0;
+    if(arrow&&overlap(box(x,y,popup),arrow)){
+      const positions=[arrow.left-popup.width,arrow.right]
+        .filter(value=>value>=minX&&value<=maxX)
+        .filter(value=>!overlap(box(value,y,popup),arrow))
+        .sort((a,b)=>Math.abs(a-x)-Math.abs(b-x));
+      if(positions.length){sideShift=positions[0]-x;x=positions[0];}
+    }
+    const obstruction=arrow&&overlap(box(x,y,popup),arrow)?1:0;
+    const displacement=Math.abs(x-candidate.x)+Math.abs(y-candidate.y);
+    // Prefer the original cursor corner over switching attachment corners
+    // for only a few pixels. This keeps an arrow-avoidance shift visually
+    // understandable even when a large popup nearly fills the canvas.
+    return {...candidate,anchorX:candidate.x,x,y,sideShift,
+      score:obstruction*100000+displacement+index*25};
+  });
+  scored.sort((a,b)=>a.score-b.score);
+  const best=scored[0];
+  // Include viewport-edge displacement as well as arrow clearance: the
+  // returned offset describes where this chosen corner actually lands.
+  return {x:best.x,y:best.y,corner:best.corner,
+    arrowAvoidancePx:best.x-best.anchorX};
 }

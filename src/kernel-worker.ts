@@ -4,6 +4,7 @@ import wasmUrl from "replicad-opencascadejs/wasm?url";
 import { Sketcher } from "replicad";
 import { setOC, sketchRectangle, sketchCircle, measureVolume, type Shape3D } from "replicad";
 import { polygonPoints } from "./geometry";
+import { signedInterval } from "./signed-extrusion";
 import { validateDocument, type Feature, type Profile } from "./model";
 import type { KernelRequest, KernelResponse, GeometryMesh, KernelStatistics } from "./kernel-protocol";
 
@@ -23,18 +24,21 @@ function initialize(): Promise<void> {
 }
 
 function makeTool(profile: Profile, feature: Feature): Shape3D {
+  // Preserve signed depth in source; normalize only for B-rep construction.
+  const span = signedInterval(feature.z,feature.depth);
+  const originZ=span.lower, height=span.height;
   const planeConfig = { plane: "XY" as const };
   if (profile.kind === "rectangle") {
     const cx = profile.x + profile.width / 2;
     const cy = profile.y + profile.height / 2;
     return sketchRectangle(profile.width, profile.height, {
-      ...planeConfig, origin: [cx, cy, feature.z]
-    }).extrude(feature.depth);
+      ...planeConfig, origin: [cx, cy, originZ]
+    }).extrude(height);
   }
   if (profile.kind === "circle") {
     return sketchCircle(profile.radius, {
-      ...planeConfig, origin: [profile.x, profile.y, feature.z]
-    }).extrude(feature.depth);
+      ...planeConfig, origin: [profile.x, profile.y, originZ]
+    }).extrude(height);
   }
   if (profile.kind === "path" && !profile.closed) {
     throw new Error("Open lines cannot be extruded: close the path first");
@@ -50,16 +54,16 @@ function makeTool(profile: Profile, feature: Feature): Shape3D {
     const p2: [number, number] = [profile.x2 - px, profile.y2 - py];
     const p3: [number, number] = [profile.x1 - px, profile.y1 - py];
     // A closed wire with two exact circular semicircles, not a tessellated polygon.
-    return new Sketcher("XY", [0, 0, feature.z])
+    return new Sketcher("XY", [0, 0, originZ])
       .movePointerTo(p0).lineTo(p1).sagittaArcTo(p2, -profile.radius)
       .lineTo(p3).sagittaArcTo(p0, -profile.radius).done()
-      .extrude(feature.depth);
+      .extrude(height);
   }
   const points = profile.kind === "polygon" ? polygonPoints(profile) : profile.points;
-  const sketch = new Sketcher("XY", [0, 0, feature.z])
+  const sketch = new Sketcher("XY", [0, 0, originZ])
     .movePointerTo([points[0].x, points[0].y]);
   for (const point of points.slice(1)) sketch.lineTo([point.x, point.y]);
-  return sketch.close().extrude(feature.depth);
+  return sketch.close().extrude(height);
 }
 
 /** Evaluate features from source parameters, never from the display triangle mesh. */
