@@ -558,6 +558,91 @@ function fillFocusedFieldFromFace(z:number|null):void {
   scheduleOperationPreview();
   field.focus({preventScroll:true});
 }
+/** Cursor-adjacent label for the committed Solid face/vertex target. */
+function updateSurfaceLabel(target:SurfaceTarget|null,pointer:{x:number,y:number}):void{
+  const tag=byId("face-target-label");
+  if(!target){
+    tag.hidden=true;
+    delete byId("preview").dataset.hoverLabel;
+    return;
+  }
+  const armed=extrudeTargets.length?facePickField:null;
+  const start=Number(input("extrude-z").value);
+  const label=formatSurfaceTarget(target,armed,Number.isFinite(start)?start:0);
+  if(!label){tag.hidden=true;return;}
+  tag.textContent=label;
+  tag.hidden=false;
+  byId("preview").dataset.hoverLabel=label;
+  const parent=byId("preview").parentElement!.getBoundingClientRect();
+  const x=pointer.x-parent.left+13,y=pointer.y-parent.top+14;
+  tag.style.left=Math.max(7,Math.min(parent.width-195,x))+"px";
+  tag.style.top=Math.max(47,Math.min(parent.height-35,y))+"px";
+}
+function hideSurfaceContext():void{
+  byId("face-context-menu").hidden=true;
+  contextSurface=null;contextFeatureId=null;
+}
+function showSurfaceContext(target:SurfaceTarget|null,pointer:{x:number,y:number}):void{
+  hideSurfaceContext();
+  if(!target)return;
+  if(target.z!==null)lastSurfaceZ=target.z;
+  contextSurface=target;
+  const panel=byId("face-context-menu");
+  panel.replaceChildren();
+  const title=document.createElement("div");
+  title.className="face-context-title";
+  title.textContent=formatSurfaceTarget(target,null,0);
+  panel.append(title);
+  const hasProfile=extrudeTargets.length>0||selectedIds.length>0;
+  const action=(name:string,enabled:boolean,run:()=>void)=>{
+    const btn=document.createElement("button");
+    btn.type="button";btn.role="menuitem";btn.textContent=name;
+    btn.disabled=!enabled;btn.dataset.faceAction=name;
+    btn.onclick=()=>{hideSurfaceContext();run();};
+    panel.append(btn);
+  };
+  action("Latch Start Z",target.z!==null&&hasProfile,()=>{
+    if(!extrudeTargets.length)openExtrude();
+    facePickField="z";
+    fillFocusedFieldFromFace(target.z);
+  });
+  action("Latch Depth",target.z!==null&&hasProfile,()=>{
+    if(!extrudeTargets.length)openExtrude();
+    facePickField="depth";
+    fillFocusedFieldFromFace(target.z);
+  });
+  const feature=featureForSurface(doc,target);
+  let deletable=false;
+  if(feature){
+    try{
+      validateDocument({...doc,features:doc.features.filter(f=>f.id!==feature.id)});
+      deletable=true;
+    }catch{deletable=false;}
+  }
+  contextFeatureId=deletable&&feature?feature.id:null;
+  action("Delete Feature",deletable&&feature!==null,()=>{
+    if(!feature)return;
+    safe(()=>{
+      const next=validateDocument({...doc,features:doc.features.filter(f=>f.id!==feature.id)});
+      closeExtrude();
+      change(next);
+      status("Deleted feature "+feature.id+" · Undo restores it");
+    });
+  });
+  if(!feature){
+    const note=document.createElement("small");
+    note.className="face-context-note";
+    note.textContent="Delete unavailable: no uniquely identified source feature";
+    panel.append(note);
+  }
+  const rect=byId("preview").parentElement!.getBoundingClientRect();
+  panel.style.left=Math.max(8,Math.min(rect.width-230,pointer.x-rect.left))+"px";
+  panel.style.top=Math.max(48,Math.min(rect.height-176,pointer.y-rect.top))+"px";
+  panel.hidden=false;
+  byId("preview").dataset.contextTargetKind=target.kind;
+  if(contextFeatureId)byId("preview").dataset.contextFeatureId=contextFeatureId;
+  else delete byId("preview").dataset.contextFeatureId;
+}
 function previewError(error:unknown):void {
   const label=byId("extrude-preview-error");
   label.hidden=false;
