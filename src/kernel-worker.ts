@@ -1,7 +1,9 @@
 /// <reference lib="webworker" />
 import opencascade from "replicad-opencascadejs";
 import wasmUrl from "replicad-opencascadejs/wasm?url";
+import { Sketcher } from "replicad";
 import { setOC, sketchRectangle, sketchCircle, measureVolume, type Shape3D } from "replicad";
+import { polygonPoints } from "./geometry";
 import { validateDocument, type Feature, type Profile } from "./model";
 import type { KernelRequest, KernelResponse, GeometryMesh, KernelStatistics } from "./kernel-protocol";
 
@@ -29,9 +31,35 @@ function makeTool(profile: Profile, feature: Feature): Shape3D {
       ...planeConfig, origin: [cx, cy, feature.z]
     }).extrude(feature.depth);
   }
-  return sketchCircle(profile.radius, {
-    ...planeConfig, origin: [profile.x, profile.y, feature.z]
-  }).extrude(feature.depth);
+  if (profile.kind === "circle") {
+    return sketchCircle(profile.radius, {
+      ...planeConfig, origin: [profile.x, profile.y, feature.z]
+    }).extrude(feature.depth);
+  }
+  if (profile.kind === "path" && !profile.closed) {
+    throw new Error("Open lines cannot be extruded: close the path first");
+  }
+  if (profile.kind === "slot") {
+    const dx = profile.x2 - profile.x1;
+    const dy = profile.y2 - profile.y1;
+    const length = Math.hypot(dx, dy);
+    const px = -dy / length * profile.radius;
+    const py = dx / length * profile.radius;
+    const p0: [number, number] = [profile.x1 + px, profile.y1 + py];
+    const p1: [number, number] = [profile.x2 + px, profile.y2 + py];
+    const p2: [number, number] = [profile.x2 - px, profile.y2 - py];
+    const p3: [number, number] = [profile.x1 - px, profile.y1 - py];
+    // A closed wire with two exact circular semicircles, not a tessellated polygon.
+    return new Sketcher("XY", [0, 0, feature.z])
+      .movePointerTo(p0).lineTo(p1).sagittaArcTo(p2, -profile.radius)
+      .lineTo(p3).sagittaArcTo(p0, -profile.radius).done()
+      .extrude(feature.depth);
+  }
+  const points = profile.kind === "polygon" ? polygonPoints(profile) : profile.points;
+  const sketch = new Sketcher("XY", [0, 0, feature.z])
+    .movePointerTo([points[0].x, points[0].y]);
+  for (const point of points.slice(1)) sketch.lineTo([point.x, point.y]);
+  return sketch.close().extrude(feature.depth);
 }
 
 /** Evaluate features from source parameters, never from the display triangle mesh. */
