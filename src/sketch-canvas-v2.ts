@@ -9,12 +9,15 @@ type Gesture =
   | { kind:"draw"; tool:DrawTool; from:Point2; to:Point2; shift:boolean }
   | { kind:"pan"; from:Point2; origin:Point2 }
   | { kind:"move"; original:Profile; from:Point2; preview:Profile; duplicate:boolean }
+  | { kind:"groupMove"; originals:Profile[]; from:Point2; previews:Profile[]; duplicate:boolean }
   | { kind:"handle"; original:Profile; index:number; preview:Profile }
   | { kind:"depth"; startY:number; startDepth:number };
 export type SketchEvents = {
   onCreate(profile:Profile):void;
   onEdit(profile:Profile):void;
-  onSelect(id:string|null):void;
+  onEditMany(profiles:Profile[]):void;
+  onCreateMany(profiles:Profile[]):void;
+  onSelect(id:string|null, additive?:boolean):void;
   onExtrude(id:string,at:Point2):void;
   onExtrudeDepth(depth:number):void;
   onViewChange(zoom:number):void;
@@ -28,6 +31,7 @@ export class SketchCanvas {
   private doc:CadDocument;
   private prefs:Preferences;
   private selected:string|null=null;
+  private selectedIds:string[]=[];
   private hover:string|null=null;
   private tool:SketchTool="select";
   private zoom=4;
@@ -64,7 +68,11 @@ export class SketchCanvas {
   }
   setDocument(doc:CadDocument):void {this.doc=doc;this.draw();}
   setPreferences(prefs:Preferences):void {this.prefs=prefs;this.draw();}
-  setSelected(id:string|null):void {this.selected=id;this.draw();}
+  setSelected(id:string|null, ids:readonly string[] = id?[id]:[]):void {
+    this.selected=id;
+    this.selectedIds=[...ids];
+    this.draw();
+  }
   setTool(tool:SketchTool):void {
     if(this.tool==="line"&&tool!=="line")this.finishLine(false);
     this.tool=tool;this.gesture=null;
@@ -78,6 +86,17 @@ export class SketchCanvas {
     const profile=this.doc.profiles.find(p=>p.id===this.selected);
     return profile?this.toScreen(centre(profile)):null;
   }
+  getExtrudeArrowScreen():Point2|null{return this.arrowScreen();}
+  getSelectionBounds():{left:number;top:number;right:number;bottom:number}|null{
+    const pts=this.doc.profiles.filter(p=>this.selectedIds.includes(p.id))
+      .flatMap(p=>outline(p).map(point=>this.toScreen(point)));
+    if(pts.length===0)return null;
+    return {
+      left:Math.min(...pts.map(p=>p.x)),right:Math.max(...pts.map(p=>p.x)),
+      top:Math.min(...pts.map(p=>p.y)),bottom:Math.max(...pts.map(p=>p.y))
+    };
+  }
+  getViewport():{width:number;height:number}{return {width:this.width,height:this.height};}
   dispose():void {this.observer.disconnect();}
   hasPendingLine():boolean{return this.linePoints.length>0;}
   cancelLine():void {this.linePoints=[];this.lineCursor=null;this.draw();}
@@ -120,14 +139,14 @@ export class SketchCanvas {
   private toScreen(p:Point2):Point2 {
     return {x:this.panX+p.x*this.zoom,y:this.panY-p.y*this.zoom};
   }
-  private maybeSnap(raw:Point2,event:{altKey?:boolean},excludeId?:string):Point2 {
+  private maybeSnap(raw:Point2,event:{altKey?:boolean},excludeId?:string|readonly string[]):Point2 {
     this.highlightedSnap=null;
     if(event.altKey)return raw;
     const maxDist=10/this.zoom;
     if(this.prefs.grid.snapGeometry){
       let target:Point2|null=null,minimum=maxDist;
       for(const profile of this.doc.profiles){
-        if(profile.id===excludeId)continue;
+        if(typeof excludeId==="string" ? profile.id===excludeId : excludeId?.includes(profile.id))continue;
         for(const point of snapPoints(profile)){
           const d=distance(raw,point);
           if(d<minimum){minimum=d;target=point;}
@@ -153,7 +172,7 @@ export class SketchCanvas {
   }
   private hitHandle(screen:Point2):number|null {
     const selected=this.doc.profiles.find(p=>p.id===this.selected);
-    if(!selected)return null;
+    if(!selected||this.selectedIds.length!==1)return null;
     const points=handles(selected);
     for(let i=0;i<points.length;i++){
       if(distance(this.toScreen(points[i].point),screen)<=11)return i;
@@ -187,20 +206,33 @@ export class SketchCanvas {
       this.draw();return;
     }else if(this.tool==="extrude"){
       const id=this.hitProfile(this.world(point));
-      this.events.onSelect(id);
-      if(id)this.events.onExtrude(id,point);
-      else this.events.onStatus("Click a closed profile to extrude or cut");
+      const additive=event.ctrlKey||event.metaKey;
+      this.events.onSelect(id,additive);
+      if(id&&!additive)this.events.onExtrude(id,point);
+      else if(!id)this.events.onStatus("Click a closed profile to extrude or cut");
       this.draw();return;
     }else if(this.tool==="select"){
+      const id=this.hitProfile(this.world(point));
+      if(event.ctrlKey||event.metaKey){
+        // No drag on Ctrl/Command click: just add/remove this sketch object.
+        this.events.onSelect(id,true);
+        this.draw();return;
+      }
       const index=this.hitHandle(point);
       const profile=this.doc.profiles.find(p=>p.id===this.selected);
       if(index!==null&&profile){
         this.gesture={kind:"handle",original:profile,index,preview:profile};
       }else{
-        const id=this.hitProfile(this.world(point));
-        this.events.onSelect(id);
+        this.events.onSelect(id,false);
         const found=this.doc.profiles.find(p=>p.id===id);
-        if(found)this.gesture={kind:"move",original:found,from:this.world(point),preview:found,duplicate:event.altKey};
+        if(found){
+          const originals=this.doc.profiles.filter(p=>this.selectedIds.includes(p.id));
+          if(originals.length>1){
+            this.gesture={kind:"groupMove",originals,previews:originals,from:this.world(point),duplicate:event.altKey};
+          }else{
+            this.gesture={kind:"move",original:found,from:this.world(point),preview:found,duplicate:event.altKey};
+          }
+        }
       }
     }else{
       const from=this.maybeSnap(this.world(point),event);
@@ -228,12 +260,17 @@ export class SketchCanvas {
       this.events.onExtrudeDepth(depth);
     }else{
       const world=this.maybeSnap(this.world(screen),event,
-        (g.kind==="move"||g.kind==="handle")?g.original.id:undefined);
+        (g.kind==="move"||g.kind==="handle")?g.original.id:
+          g.kind==="groupMove"?g.originals.map(p=>p.id):undefined);
       if(g.kind==="draw"){g.to=world;g.shift=event.shiftKey;}
       else if(g.kind==="move"){
         let dx=world.x-g.from.x,dy=world.y-g.from.y;
         if(event.shiftKey){if(Math.abs(dx)>=Math.abs(dy))dy=0;else dx=0;}
         g.preview=translate(g.original,dx,dy);
+      }else if(g.kind==="groupMove"){
+        let dx=world.x-g.from.x,dy=world.y-g.from.y;
+        if(event.shiftKey){if(Math.abs(dx)>=Math.abs(dy))dy=0;else dx=0;}
+        g.previews=g.originals.map(p=>translate(p,dx,dy));
       }else if(g.kind==="handle")g.preview=moveHandle(g.original,g.index,world,event.shiftKey);
     }
     this.draw();
@@ -267,6 +304,11 @@ export class SketchCanvas {
         }else if(g.tool==="slot"){
           if(distance(g.from,to)>1e-6)this.events.onCreate({
             id:newId("slot"),kind:"slot",x1:g.from.x,y1:g.from.y,x2:to.x,y2:to.y,radius:this.slotRadius});
+        }
+      }else if(g.kind==="groupMove"){
+        if(g.previews.some((p,i)=>JSON.stringify(p)!==JSON.stringify(g.originals[i]))){
+          if(g.duplicate)this.events.onCreateMany(g.previews.map(p=>({...p,id:newId("copy")})));
+          else this.events.onEditMany(g.previews);
         }
       }else if(g.kind==="move"||g.kind==="handle"){
         if(JSON.stringify(g.preview)!==JSON.stringify(g.original)){
@@ -321,7 +363,7 @@ export class SketchCanvas {
     ctx.setLineDash(draft?[5,4]:p.kind==="path"&&!p.closed?[8,4]:[]);
     if(isClosed(p))ctx.fill();
     ctx.stroke();ctx.setLineDash([]);
-    if(selected&&!draft){
+    if(selected&&!draft&&this.selectedIds.length===1){
       for(const h of handles(p)){
         const v=this.toScreen(h.point);
         ctx.fillStyle="#f9c889";ctx.strokeStyle="#61411e";ctx.lineWidth=1;
@@ -382,8 +424,15 @@ export class SketchCanvas {
     const ctx=this.ctx;
     ctx.strokeStyle="#f6ba66";ctx.lineWidth=3;ctx.beginPath();
     ctx.moveTo(anchor.x+22,anchor.y);ctx.lineTo(end.x,end.y);ctx.stroke();
-    ctx.beginPath();ctx.moveTo(end.x-6,end.y+8);ctx.lineTo(end.x,end.y-5);ctx.lineTo(end.x+6,end.y+8);ctx.stroke();
-    ctx.fillStyle="#f6ba66";ctx.beginPath();ctx.arc(end.x,end.y,9,0,Math.PI*2);ctx.fill();
+    // Filled upward arrowhead instead of a circular draggable end cap.
+    ctx.fillStyle="#f6ba66";
+    ctx.beginPath();
+    ctx.moveTo(end.x,end.y-13);
+    ctx.lineTo(end.x-11,end.y+10);
+    ctx.lineTo(end.x-4,end.y+7);
+    ctx.lineTo(end.x+4,end.y+7);
+    ctx.lineTo(end.x+11,end.y+10);
+    ctx.closePath();ctx.fill();
     ctx.textAlign="left";ctx.fillStyle="#ffd6a1";ctx.font="12px ui-monospace,monospace";
     ctx.fillText("↕ "+fmt(this.extrude.depth)+" mm",end.x+16,end.y+4);
   }
@@ -393,9 +442,11 @@ export class SketchCanvas {
     ctx.fillStyle="#0b1422";ctx.fillRect(0,0,this.width,this.height);
     this.drawGrid();
     const preview=this.gesture?.kind==="move"||this.gesture?.kind==="handle"?this.gesture.preview:null;
+    const group=this.gesture?.kind==="groupMove"?new Map(this.gesture.previews.map(p=>[p.id,p])):null;
     for(const p of this.doc.profiles){
-      const item=preview?.id===p.id?preview:p;
-      this.paintShape(item,item.id===this.selected,item.id===this.hover,preview?.id===p.id);
+      const item=group?.get(p.id)??(preview?.id===p.id?preview:p);
+      this.paintShape(item,this.selectedIds.includes(item.id),item.id===this.hover,
+        preview?.id===p.id||Boolean(group?.has(p.id)));
     }
     if(this.gesture?.kind==="draw")this.paintDraft(this.gesture);
     this.paintLine();this.paintExtrude();
