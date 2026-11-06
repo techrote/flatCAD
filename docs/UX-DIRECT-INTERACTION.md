@@ -77,3 +77,26 @@ Project schema v2 adds regular polygon, exact slot, and open/closed polyline pro
 7. Customize three grid spacings/colours, toggle visibility and per-tier snap; verify persisted JSON and pixel/world snapping behaviour at varying zoom.
 8. Edit older feature dimensions and check exact recompute, undo/redo, and project JSON round-trip.
 9. Test with keyboard-only, mouse, Firefox and Windows; record where users need coaching. No blanket UX quality claims without human evidence.
+
+## Direct-selection and operation-preview extension (2026-11-06)
+
+**Ctrl/Command + click** toggles membership of the selection set, including circles, polygons, slots and enclosed path regions already represented as profile objects. Unmodified clicking an already-selected group member preserves group selection for dragging. Ctrl-click empty space retains selection; ordinary click empty clears it. A selected group moves, duplicates and deletes in one undo-history change; E creates one ordered exact feature per selected closed profile, validated and committed atomically.
+
+This does **not** yet imply derived region selection from intersecting sketches or general multi-face selection in the 3D viewer. All selected objects remain explicitly authored profile entities.
+
+The extrusion flyout is positioned relative to the union of selected geometry's screen-space bounding boxes. Candidate positions are separated from the geometry by exactly the configured *major* grid spacing in millimetres, converted using the current canvas zoom. Placement avoids covering the draggable arrowhead, tries the opposite side before covering a region, and clamps inside small windows when no collision-free position exists. Placement updates on open, zoom and major-grid preference changes.
+
+The depth handle is a **filled triangular arrowhead**, not a circular knob. Its shaft remains visible on the sketch, with live dimension feedback.
+
+**Preview in solid view** (default ON during the session) evaluates an ephemeral feature set with the same OpenCascade Web Worker used for committed operations. The provisional result replaces the normal solid mesh visually and is coloured turquoise for Add or orange for Cut, with a persistent "PREVIEW · NOT APPLIED" label. Its volume is available as a browser-test diagnostic, but it is not saved to the CAD document or history. Cancelling/disabling preview restores the last committed B-rep mesh. Preview work is debounced (250 ms), at most one request may be in flight and stale responses are discarded when a newer input arrives. This is a resulting-solid preview, not yet a translucent union/difference ghost overlay.
+
+The popover also retains the exact numerical operation mode, start Z and depth, and its through-all cut toggle. Numeric changes or arrow dragging trigger provisional recomputation if preview is enabled. Backend errors are reported inside the flyout, not silently treated as successful geometry.
+
+### Acceptance additions
+
+- Ctrl-click two independent hole profiles; E auto-selects Cut, creates two features as one undo step, and preserves a versioned native document.
+- Ctrl-click toggles a selected object off; ordinary click replaces multi-selection; grouped move and duplicate are atomic and keep stable references.
+- Change major grid spacing and zoom; confirm the popover offset follows physical-mm spacing while respecting viewport edges and arrow clearance.
+- Compare exact B-rep volume in provisional Add/Cut preview to base geometry; turning preview off and cancelling cannot alter the saved native feature history.
+- Drag the arrowhead and verify provisional depth changes before committing.
+- Test worker errors, pending requests, rapid edits and stale response suppression on real browsers; stress and slow-worker qualification remain open.
