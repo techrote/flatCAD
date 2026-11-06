@@ -4,7 +4,10 @@ import {
   DEMO, appendFeature, appendProfile, deleteProfile, newId, updateProfile, validateDocument,
   type CadDocument, type Feature, type Profile, type Point2
 } from "./model";
-import { centre, isClosed, suggestOperation, translate } from "./geometry";
+import { isClosed, translate } from "./geometry";
+import { nextSelection, selectedProfiles, suggestGroupOperation, documentWithExtrusions, documentWithMovedProfiles } from "./selection";
+import { placeExtrudeMenu } from "./extrude-placement";
+import type { KernelBuild } from "./kernel-protocol";
 import { SketchCanvas, type SketchTool } from "./sketch-canvas-v2";
 import { KernelClient } from "./kernel-client";
 import { Preview } from "./preview";
@@ -54,7 +57,8 @@ root.innerHTML=[
   '        </div>',
   '        <div id="shape-options" class="floating-tool-options" hidden></div>',
   '        <div id="selection-bar" class="selection-bar" hidden>',
-  '          <button id="selection-extrude" title="Extrude or cut (E)">↥ Extrude</button>',
+  '          <span id="selection-count" class="selection-count" hidden>0 selected</span>',
+  '          <button id="selection-extrude" title="Extrude or cut selection (E)">↥ Extrude</button>',
   '          <button id="selection-duplicate" title="Duplicate (Ctrl+D)">⧉</button>',
   '          <button id="selection-properties" title="Exact dimensions">▤</button>',
   '          <button id="selection-delete" title="Delete selected">×</button>',
@@ -66,6 +70,8 @@ root.innerHTML=[
   '          <div class="field-row"><label class="field"><span>Start Z · mm</span><input type="number" step="any" id="extrude-z" value="0"></label>',
   '            <label class="field"><span>Depth · mm</span><input type="number" min="0.001" step="any" id="extrude-depth" value="8"></label></div>',
   '          <label class="check through-all"><input type="checkbox" id="extrude-through"> Through all (cut)</label>',
+  '          <label class="check live-preview"><input type="checkbox" id="extrude-preview" checked> Preview in solid view</label>',
+  '          <span id="extrude-preview-error" class="preview-error" role="status" hidden></span>',
   '          <div class="form-actions"><button id="apply-extrude" class="button primary">Apply <kbd>Enter</kbd></button><button id="dismiss-extrude" class="button muted-button">Cancel</button></div>',
   '          <small class="flyout-hint">Drag the amber arrow in the sketch to set depth</small>',
   '        </section>',
@@ -78,6 +84,7 @@ root.innerHTML=[
   '      <section class="panel preview-panel">',
   '        <div class="panel-head compact-head"><div class="header-label"><span class="panel-index">02</span><div><strong>Solid</strong><small>Orbit · zoom · inspect</small></div></div><span class="chip">Z ↑</span></div>',
   '        <div id="preview" class="preview-root"><span class="placeholder">Loading 3D preview…</span></div>',
+  '        <span id="solid-preview-status" class="solid-preview-status" hidden>PREVIEW · NOT APPLIED</span>',
   '      </section>',
   '      <div class="inspector-drawer">',
   '        <details id="properties-details" class="drawer"><summary>Properties <span id="selection-name" class="muted">Nothing selected</span></summary>',
@@ -123,9 +130,12 @@ function initialDocument():CadDocument{
 let doc=initialDocument();
 let prefs=loadPreferences();
 let history:CadDocument[]=[doc],historyIndex=0;
-let selectedId:string|null=null,activeTool:SketchTool="select";
+let selectedId:string|null=null,selectedIds:string[]=[],activeTool:SketchTool="select";
 let activeMenu:string|null=null;
-let extrudeTarget:string|null=null;
+let extrudeTarget:string|null=null,extrudeTargets:string[]=[];
+let previewEnabled=true,previewToken=0,previewInFlight=false;
+let previewTimer:ReturnType<typeof setTimeout>|undefined;
+let committedBuild:KernelBuild|null=null;
 let shortcutRecording:ShortcutAction|null=null;
 let lastStats:{volumeMm3:number,boundsMm:[[number,number,number],[number,number,number]]}|null=null;
 let generation=0,buildTimer:ReturnType<typeof setTimeout>|undefined;
@@ -133,9 +143,14 @@ let slotRadius=3;
 
 const kernel=new KernelClient();
 const canvas=new SketchCanvas(inputCanvas(),doc,prefs,{
-  onCreate:p=>safe(()=>{selectedId=p.id;change(appendProfile(doc,p));setTool("select");}),
+  onCreate:p=>safe(()=>{selectedId=p.id;selectedIds=[p.id];change(appendProfile(doc,p));setTool("select");}),
+  onCreateMany:profiles=>safe(()=>{
+    selectedIds=profiles.map(p=>p.id);selectedId=selectedIds.at(-1)??null;
+    change(validateDocument({...doc,profiles:[...doc.profiles,...profiles]}));
+  }),
   onEdit:p=>safe(()=>change(updateProfile(doc,p))),
-  onSelect:id=>{selectedId=id;render();},
+  onEditMany:profiles=>safe(()=>change(documentWithMovedProfiles(doc,profiles))),
+  onSelect:(id,additive=false)=>selectProfile(id,additive),
   onExtrude:(id,at)=>openExtrude(id,undefined,at),
   onExtrudeDepth:depth=>{
     input("extrude-depth").value=String(depth);
@@ -143,8 +158,12 @@ const canvas=new SketchCanvas(inputCanvas(),doc,prefs,{
     if(resolveMode()==="cut"&&lastStats){
       input("extrude-z").value=String(lastStats.boundsMm[1][2]-depth);
     }
+    scheduleOperationPreview();
   },
-  onViewChange:zoom=>{byId("zoom").textContent=zoom.toFixed(2)+" px/mm";},
+  onViewChange:zoom=>{
+    byId("zoom").textContent=zoom.toFixed(2)+" px/mm";
+    if(extrudeTarget)positionExtrudeMenu();
+  },
   onStatus:message=>status(message)
 });
 function inputCanvas():HTMLCanvasElement{return byId<HTMLCanvasElement>("sketch");}
@@ -164,8 +183,10 @@ function persistDocument():void{
   catch{status("Autosave unavailable; use File → Save project",true);}
 }
 function persistPreferences():void{
-  try{prefs=validatePreferences(prefs);savePreferences(prefs);canvas.setPreferences(prefs);}
-  catch(error){status("Settings invalid: "+String(error),true);}
+  try{
+    prefs=validatePreferences(prefs);savePreferences(prefs);canvas.setPreferences(prefs);
+    if(extrudeTarget)positionExtrudeMenu();
+  }catch(error){status("Settings invalid: "+String(error),true);}
 }
 function change(next:CadDocument):void{
   doc=validateDocument(next);
@@ -203,17 +224,28 @@ function setTool(tool:SketchTool):void{
   renderToolOptions();closeMenu();
 }
 function getProfile(id:string|null):Profile|undefined{return doc.profiles.find(p=>p.id===id);}
-function selectProfile(id:string|null):void{selectedId=id;render();}
+function selectProfile(id:string|null,additive=false):void{
+  selectedIds=nextSelection(selectedIds,id,additive);
+  selectedId=selectedIds.at(-1)??null;
+  if(extrudeTargets.length&&(
+    extrudeTargets.length!==selectedIds.length||
+    extrudeTargets.some(value=>!selectedIds.includes(value))))closeExtrude();
+  render();
+}
 function render():void{
-  if(selectedId&&!getProfile(selectedId))selectedId=null;
-  canvas.setDocument(doc);canvas.setSelected(selectedId);
+  selectedIds=selectedIds.filter(id=>Boolean(getProfile(id)));
+  selectedId=selectedIds.at(-1)??null;
+  canvas.setDocument(doc);canvas.setSelected(selectedId,selectedIds);
   byId("profile-count").textContent=String(doc.profiles.length)+" profiles";
   byId("feature-count").textContent=String(doc.features.length)+" operations";
-  byId("selection-name").textContent=getProfile(selectedId)?.kind||"Nothing selected";
+  byId("selection-name").textContent=selectedIds.length>1?
+    selectedIds.length+" profiles selected":getProfile(selectedId)?.kind||"Nothing selected";
+  byId("selection-count").hidden=selectedIds.length<2;
+  byId("selection-count").textContent=selectedIds.length+" selected";
   input("document-name").value=doc.name;
   button("undo").disabled=historyIndex===0;
   button("redo").disabled=historyIndex===history.length-1;
-  byId("selection-bar").hidden=!selectedId;
+  byId("selection-bar").hidden=selectedIds.length===0;
   renderProfileList();renderProperties();renderHistory();
 }
 function numField(label:string,value:number,onChange:(x:number)=>void):HTMLLabelElement{
@@ -236,6 +268,11 @@ function renderProperties():void{
   const target=byId("inspector");target.replaceChildren();
   const p=getProfile(selectedId);
   if(!p){target.textContent="Select a sketch element to edit its exact parameters.";return;}
+  if(selectedIds.length>1){
+    target.textContent=selectedIds.length+
+      " profiles selected · drag to move as a group, Ctrl+D to duplicate, Delete to remove, or E to extrude/cut together.";
+    return;
+  }
   const heading=document.createElement("strong");heading.textContent=p.kind+" · "+p.id;
   target.append(heading);
   const fields=document.createElement("div");fields.className="property-fields";
@@ -279,9 +316,10 @@ function renderProfileList():void{
   const target=byId("profile-list");target.replaceChildren();
   for(const p of doc.profiles){
     const row=document.createElement("button");
-    row.className="profile-item"+(selectedId===p.id?" selected":"");
+    row.className="profile-item"+(selectedIds.includes(p.id)?" selected":"");
+    row.setAttribute("aria-pressed",String(selectedIds.includes(p.id)));
     row.textContent=(p.kind==="path"&&!p.closed?"╱ ":"▭ ")+p.kind+" · "+p.id.slice(0,15);
-    row.onclick=()=>selectProfile(p.id);target.append(row);
+    row.onclick=event=>selectProfile(p.id,event.ctrlKey||event.metaKey);target.append(row);
   }
   if(!doc.profiles.length)target.textContent="Empty sketch — draw a profile.";
 }
@@ -314,18 +352,29 @@ function updateFeature(feature:Feature):void{
   change(validateDocument({...doc,features:doc.features.map(f=>f.id===feature.id?feature:f)}));
 }
 function removeSelected():void {
-  if(!selectedId)return;
-  change(deleteProfile(doc,selectedId));selectedId=null;render();
+  if(selectedIds.length===0)return;
+  const removing=new Set(selectedIds);
+  const next=validateDocument({
+    ...doc,
+    profiles:doc.profiles.filter(p=>!removing.has(p.id)),
+    features:doc.features.filter(f=>!removing.has(f.profileId))
+  });
+  selectedIds=[];selectedId=null;change(next);
 }
 function duplicateSelected():void {
-  const p=getProfile(selectedId);
-  if(!p)return;
-  const duplicate={...translate(p,5,5),id:newId("copy")};
-  selectedId=duplicate.id;change(appendProfile(doc,duplicate));
+  const profiles=selectedProfiles(doc,selectedIds);
+  if(!profiles.length)return;
+  const copies=profiles.map(p=>({...translate(p,5,5),id:newId("copy")}));
+  const next=validateDocument({...doc,profiles:[...doc.profiles,...copies]});
+  selectedIds=copies.map(p=>p.id);selectedId=selectedIds.at(-1)??null;
+  change(next);
 }
 function rebuild():void {
   const n=++generation;
+  ++previewToken;
+  clearTimeout(previewTimer);
   clearTimeout(buildTimer);
+  committedBuild=null;
   const snapshot=doc;
   status(snapshot.features.length?"Regenerating exact solid…":"Sketch ready · press E on a closed shape");
   buildTimer=setTimeout(async()=>{
@@ -333,7 +382,9 @@ function rebuild():void {
       const result=await kernel.build(snapshot);
       if(n!==generation)return;
       lastStats=result.statistics;
-      preview?.setMesh(result.mesh);
+      committedBuild=result;
+      if(extrudeTargets.length&&input("extrude-preview").checked) scheduleOperationPreview();
+      else preview?.setMesh(result.mesh);
       if(result.statistics){
         byId("status").dataset.volumeMm3=String(result.statistics.volumeMm3);
         byId("status").dataset.boundsMm=JSON.stringify(result.statistics.boundsMm);
@@ -345,7 +396,8 @@ function rebuild():void {
         "Sketch ready · press E on a closed shape");
     }catch(error){
       if(n!==generation)return;
-      lastStats=null;preview?.setMesh(null);
+      lastStats=null;committedBuild=null;
+      if(!extrudeTargets.length||!input("extrude-preview").checked)preview?.setMesh(null);
       status("CAD build failed: "+String(error),true);
     }
   },180);
