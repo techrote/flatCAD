@@ -262,3 +262,46 @@ test("dragging the extrusion arrow changes proposed depth and 3D volume before A
   const untouched=await page.evaluate(()=>JSON.parse(localStorage.getItem("flatcad.project.v1")!));
   expect(untouched.features).toHaveLength(0);
 });
+
+
+test("Ctrl-selected profiles move, duplicate and delete as a group in atomic history steps",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const b=(await page.locator("#sketch").boundingBox())!;
+  const left=b.x+b.width/2-35*4, right=b.x+b.width/2+35*4, mid=b.y+b.height/2;
+  await page.keyboard.down("Control");
+  await page.mouse.click(left,mid);
+  await page.mouse.click(right,mid);
+  await page.keyboard.up("Control");
+  await expect(page.locator("#selection-count")).toHaveText("2 selected");
+  // Unmodified drag on an existing member preserves group selection.
+  await page.mouse.move(left,mid);
+  await page.mouse.down();
+  await page.mouse.move(left+20,mid,{steps:5});
+  await page.mouse.up();
+  const moved=await page.evaluate(()=>JSON.parse(localStorage.getItem("flatcad.project.v1")!));
+  expect(moved.profiles.find((p:{id:string})=>p.id==="hole_l").x).toBe(-30);
+  expect(moved.profiles.find((p:{id:string})=>p.id==="hole_r").x).toBe(40);
+  await page.keyboard.press("Control+d");
+  await expect(page.locator("#profile-count")).toContainText("5 profiles");
+  await expect(page.locator("#selection-count")).toHaveText("2 selected");
+  await page.keyboard.press("Delete");
+  await expect(page.locator("#profile-count")).toContainText("3 profiles");
+  await page.keyboard.press("Control+z");
+  await expect(page.locator("#profile-count")).toContainText("5 profiles");
+});
+
+test("extrusion flyout offset follows a modified major-grid spacing",async({page})=>{
+  await page.goto("/");
+  await page.keyboard.press("g");
+  await expect(page.locator("#grid-dialog")).toBeVisible();
+  await page.getByLabel("Major spacing mm").fill("12");
+  await page.getByLabel("Major spacing mm").press("Tab");
+  await page.locator('[data-close="grid-dialog"]').last().click();
+  await newProject(page);
+  await page.keyboard.press("r");
+  await draw(page,[.35,.38],[.56,.60]);
+  await page.keyboard.press("e");
+  await expect(page.locator("#extrude-flyout")).toBeVisible();
+  await expect(page.locator("#extrude-flyout")).toHaveAttribute("data-major-grid-pixels","48");
+});
