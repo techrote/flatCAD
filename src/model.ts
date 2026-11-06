@@ -38,13 +38,14 @@ export function validateDocument(input: unknown): CadDocument {
   const profiles: Profile[] = input.profiles.map((p: unknown) => {
     failUnless(record(p) && identifier(p.id) && !ids.has(p.id), "invalid/duplicate profile ID");
     ids.add(p.id);
-    if(p.kind!=="path"&&p.kind!=="slot")failUnless(coordinate(p.x)&&coordinate(p.y),"invalid profile coordinates");
     if (p.kind === "rectangle") {
+      failUnless(coordinate(p.x)&&coordinate(p.y),"invalid rectangle coordinates");
       failUnless(positive(p.width) && positive(p.height), "invalid rectangle dimensions");
       failUnless(Math.abs(p.x + p.width) <= LIMIT && Math.abs(p.y + p.height) <= LIMIT, "rectangle outside extent");
       return { kind: "rectangle", id: p.id, x: p.x, y: p.y, width: p.width, height: p.height };
     }
     if (p.kind === "circle") {
+      failUnless(coordinate(p.x)&&coordinate(p.y),"invalid circle coordinates");
       failUnless(positive(p.radius), "invalid circle radius");
       failUnless(Math.abs(p.x) + p.radius <= LIMIT && Math.abs(p.y) + p.radius <= LIMIT, "circle outside extent");
       return { kind: "circle", id: p.id, x: p.x, y: p.y, radius: p.radius };
@@ -52,14 +53,17 @@ export function validateDocument(input: unknown): CadDocument {
 
     failUnless(input.schemaVersion===2,"older project schemas cannot contain extended geometry");
     if(p.kind==="polygon"){
-      failUnless(positive(p.radius)&&Number.isInteger(p.sides)&&p.sides>=3&&p.sides<=64 &&
-        coordinate(p.rotation),"invalid polygon parameters");
+      failUnless(coordinate(p.x)&&coordinate(p.y)&&positive(p.radius)&&coordinate(p.rotation),
+        "invalid polygon coordinates or radius");
+      failUnless(typeof p.sides==="number"&&Number.isInteger(p.sides)&&p.sides>=3&&p.sides<=64,
+        "polygon sides must be an integer from 3 to 64");
       failUnless(Math.abs(p.x)+p.radius<=LIMIT&&Math.abs(p.y)+p.radius<=LIMIT,"polygon outside extent");
       return {kind:"polygon",id:p.id,x:p.x,y:p.y,radius:p.radius,sides:p.sides,rotation:p.rotation};
     }
     if(p.kind==="slot"){
       failUnless(coordinate(p.x1)&&coordinate(p.y1)&&coordinate(p.x2)&&coordinate(p.y2)&&
-        positive(p.radius)&&Math.hypot(p.x2-p.x1,p.y2-p.y1)>1e-9,"invalid slot parameters");
+        positive(p.radius),"invalid slot parameters");
+      failUnless(Math.hypot(p.x2-p.x1,p.y2-p.y1)>1e-9,"slot endpoints cannot coincide");
       failUnless([p.x1,p.y1,p.x2,p.y2].every(v=>Math.abs(v)+p.radius<=LIMIT),"slot outside extent");
       return {kind:"slot",id:p.id,x1:p.x1,y1:p.y1,x2:p.x2,y2:p.y2,radius:p.radius};
     }
