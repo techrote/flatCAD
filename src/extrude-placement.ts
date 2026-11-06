@@ -1,71 +1,53 @@
-/** Position popup with one corner at cursor. Only the extrusion arrow may displace it. */
+/** Cursor-corner extrusion flyout; sketch geometry may overlap the popup. */
 export type Dimensions={width:number,height:number};
 export type Point={x:number,y:number};
 export type CursorCorner="top-left"|"top-right"|"bottom-left"|"bottom-right";
 export type Placement={x:number,y:number,corner:CursorCorner,arrowAvoidancePx:number};
-export type Rectangle2={left:number,top:number,right:number,bottom:number};
-
-function overlap(a:Rectangle2,b:Rectangle2):number{
-  return Math.max(0,Math.min(a.right,b.right)-Math.max(a.left,b.left)) *
-    Math.max(0,Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top));
+type Rect={left:number,top:number,right:number,bottom:number};
+function overlap(a:Rect,b:Rect):boolean{
+  return a.left<b.right && a.right>b.left && a.top<b.bottom && a.bottom>b.top;
 }
-function rect(x:number,y:number,p:Dimensions):Rectangle2{
-  return {left:x,top:y,right:x+p.width,bottom:y+p.height};
+function box(x:number,y:number,p:Dimensions):Rect{
+  return {left:x,right:x+p.width,top:y,bottom:y+p.height};
 }
-/** No sketch-overlap test: the corner closest to the cursor is preferred unless
- *  it would cover the arrow or leave the viewport. If the arrow lies under the
- *  popup, move the popup HORIZONTALLY just far enough to expose the handle. */
+/** Prefer the upper-left mouse corner with minimal adjustment; if the panel
+ * would cover the handle, shift horizontally. On viewport edges, flip the
+ * anchored corner or clamp only as far as necessary. Never avoid sketch edges. */
 export function placeExtrudeMenu(args:{
-  viewport:Dimensions;cursor:Point;popup:Dimensions;arrow?:Point|null;
+  viewport:Dimensions,cursor:Point,popup:Dimensions,arrow?:Point|null
 }):Placement{
-  const {viewport:v,cursor:c,popup:p}=args;
-  const margin=8,clearance=16;
-  const maxX=Math.max(margin,v.width-p.width-margin);
-  const maxY=Math.max(margin,v.height-p.height-margin);
-  const clamp=(n:number,low:number,high:number)=>Math.max(low,Math.min(high,n));
-  const arrowRect=args.arrow?{
+  const {viewport,cursor,popup}=args;
+  const pad=8,clearance=16;
+  const minX=pad,minY=pad,maxX=Math.max(pad,viewport.width-popup.width-pad),
+    maxY=Math.max(pad,viewport.height-popup.height-pad);
+  const clamp=(v:number,lo:number,hi:number)=>Math.max(lo,Math.min(hi,v));
+  const arrow=args.arrow?{
     left:args.arrow.x-clearance,right:args.arrow.x+clearance,
     top:args.arrow.y-clearance,bottom:args.arrow.y+clearance
   }:null;
-  const corners:{corner:CursorCorner,x:number,y:number}[]=[
-    {corner:"top-left",x:c.x,y:c.y},
-    {corner:"top-right",x:c.x-p.width,y:c.y},
-    {corner:"bottom-left",x:c.x,y:c.y-p.height},
-    {corner:"bottom-right",x:c.x-p.width,y:c.y-p.height},
+  const possibilities:{corner:CursorCorner,x:number,y:number}[]=[
+    {corner:"top-left",x:cursor.x,y:cursor.y},
+    {corner:"top-right",x:cursor.x-popup.width,y:cursor.y},
+    {corner:"bottom-left",x:cursor.x,y:cursor.y-popup.height},
+    {corner:"bottom-right",x:cursor.x-popup.width,y:cursor.y-popup.height},
   ];
-  const scored=corners.map((candidate,index)=>{
-    const x=clamp(candidate.x,margin,maxX);
-    const y=clamp(candidate.y,margin,maxY);
-    const dislocation=Math.abs(x-candidate.x)+Math.abs(y-candidate.y);
-    const arrowOverlap=arrowRect?overlap(rect(x,y,p),arrowRect):0;
-    // Caller receives the exact cursor corner when there is room.
-    return {...candidate,index,x,y,dislocation,arrowOverlap};
+  const scored=possibilities.map((candidate,index)=>{
+    let x=clamp(candidate.x,minX,maxX);
+    const y=clamp(candidate.y,minY,maxY);
+    let sideShift=0;
+    if(arrow&&overlap(box(x,y,popup),arrow)){
+      const positions=[arrow.left-popup.width,arrow.right]
+        .filter(value=>value>=minX&&value<=maxX)
+        .filter(value=>!overlap(box(value,y,popup),arrow))
+        .sort((a,b)=>Math.abs(a-x)-Math.abs(b-x));
+      if(positions.length){sideShift=positions[0]-x;x=positions[0];}
+    }
+    const obstruction=arrow&&overlap(box(x,y,popup),arrow)?1:0;
+    const displacement=Math.abs(x-candidate.x)+Math.abs(y-candidate.y);
+    return {...candidate,x,y,sideShift,
+      score:obstruction*100000+displacement+index*0.01};
   });
-  // First try the mouse-anchored upper-left corner. If it covers the arrow,
-  // slide only as far as necessary sideways; preserve its vertical anchor.
-  // Other cursor corners are fallback only when that is not possible.
-  for(const candidate of scored){
-    if(candidate.dislocation!==0)continue;
-    if(candidate.arrowOverlap===0)
-      return {x:candidate.x,y:candidate.y,corner:candidate.corner,arrowAvoidancePx:0};
-    if(!arrowRect)continue;
-    const left=arrowRect.left-p.width,right=arrowRect.right;
-    const options=[left,right]
-      .filter(x=>x>=margin&&x<=maxX)
-      .filter(x=>overlap(rect(x,candidate.y,p),arrowRect)===0)
-      .sort((a,b)=>Math.abs(a-candidate.x)-Math.abs(b-candidate.x));
-    if(options.length)return {x:options[0],y:candidate.y,
-      corner:candidate.corner,arrowAvoidancePx:options[0]-candidate.x};
-  }
-  const chosen=scored.sort((a,b)=>(a.dislocation+a.arrowOverlap*1000+a.index*.01)-
-                                       (b.dislocation+b.arrowOverlap*1000+b.index*.01))[0];
-  let x=chosen.x,y=chosen.y,offset=0;
-  if(arrowRect&&overlap(rect(x,y,p),arrowRect)>0){
-    const left=arrowRect.left-p.width, right=arrowRect.right;
-    const options=[left,right].filter(candidate=>candidate>=margin&&candidate<=maxX)
-      .filter(candidate=>overlap(rect(candidate,y,p),arrowRect)===0)
-      .sort((a,b)=>Math.abs(a-x)-Math.abs(b-x));
-    if(options.length){offset=options[0]-x;x=options[0];}
-  }
-  return {x,y,corner:chosen.corner,arrowAvoidancePx:offset};
+  scored.sort((a,b)=>a.score-b.score);
+  const best=scored[0];
+  return {x:best.x,y:best.y,corner:best.corner,arrowAvoidancePx:best.sideShift};
 }
