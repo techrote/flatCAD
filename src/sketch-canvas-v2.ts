@@ -1,10 +1,10 @@
 import { newId, type CadDocument, type Point2, type Profile } from "./model";
 import { centre, distance, handles, hit, isClosed, isSimplePolygon, moveHandle, outline, snapPoints, translate } from "./geometry";
 import type { Preferences } from "./preferences";
+import { draftProfile, type DrawTool } from "./draw-primitives";
 
 export type SketchTool =
   | "select" | "line" | "rectangle" | "centerRectangle" | "circle" | "polygon" | "slot" | "pan" | "extrude";
-type DrawTool = "rectangle" | "centerRectangle" | "circle" | "polygon" | "slot";
 type Gesture =
   | { kind:"draw"; tool:DrawTool; from:Point2; to:Point2; shift:boolean }
   | { kind:"pan"; from:Point2; origin:Point2 }
@@ -41,6 +41,8 @@ export class SketchCanvas {
   private height=1;
   private mounted=false;
   private gesture:Gesture|null=null;
+  /** A zero-size release retains the initial datum until the second click. */
+  private pendingDraw:Extract<Gesture,{kind:"draw"}>|null=null;
   private linePoints:Point2[]=[];
   private lineCursor:Point2|null=null;
   private highlightedSnap:Point2|null=null;
@@ -58,12 +60,21 @@ export class SketchCanvas {
     if(!ctx)throw new Error("Canvas 2D is not supported");
     this.ctx=ctx;
     this.doc=initial;this.prefs=prefs;
+    // The sketch canvas cannot be dragged as a DOM element/background. Only
+    // the explicit Pan tool or middle mouse button moves its world viewport.
+    canvas.draggable=false;
+    canvas.style.userSelect="none";
+    canvas.style.touchAction="none";
+    canvas.addEventListener("dragstart",event=>event.preventDefault());
+    canvas.addEventListener("selectstart",event=>event.preventDefault());
     this.observer=new ResizeObserver(()=>this.resize());
     this.observer.observe(canvas);this.resize();
     canvas.addEventListener("pointerdown",e=>this.pointerDown(e));
     canvas.addEventListener("pointermove",e=>this.pointerMove(e));
     canvas.addEventListener("pointerup",e=>this.pointerUp(e));
-    canvas.addEventListener("pointercancel",()=>{this.gesture=null;this.draw();});
+    canvas.addEventListener("pointercancel",()=>{
+      this.gesture=null;this.draw();
+    });
     canvas.addEventListener("wheel",e=>this.wheel(e),{passive:false});
     canvas.addEventListener("contextmenu",e=>e.preventDefault());
   }
@@ -76,6 +87,7 @@ export class SketchCanvas {
   }
   setTool(tool:SketchTool):void {
     if(this.tool==="line"&&tool!=="line")this.finishLine(false);
+    this.cancelPendingDraw(false);
     this.tool=tool;this.gesture=null;
     this.canvas.style.cursor=tool==="pan"?"grab":tool==="select"?"default":"crosshair";
     this.draw();
@@ -83,6 +95,13 @@ export class SketchCanvas {
   setSlotRadius(r:number):void {if(Number.isFinite(r)&&r>0)this.slotRadius=r;}
   setExtrudeHandle(handle:{id:string,depth:number}|null):void {this.extrude=handle;this.draw();}
   getZoom():number{return this.zoom;}
+  hasPendingDraw():boolean{return this.pendingDraw!==null;}
+  cancelPendingDraw(redraw=true):void{
+    this.pendingDraw=null;
+    delete this.canvas.dataset.drawStage;
+    delete this.canvas.dataset.drawTool;
+    if(redraw)this.draw();
+  }
   getSelectedPoint():Point2|null{
     const profile=this.doc.profiles.find(p=>p.id===this.selected);
     return profile?this.toScreen(centre(profile)):null;
@@ -191,10 +210,25 @@ export class SketchCanvas {
   }
   private pointerDown(event:PointerEvent):void {
     if(event.button!==0&&event.button!==1)return;
+    event.preventDefault();
     const point=this.screen(event);
     this.lastPointer=point;
     if(this.tool==="pan"||event.button===1){
       this.gesture={kind:"pan",from:point,origin:{x:this.panX,y:this.panY}};
+    }else if(this.pendingDraw&&this.pendingDraw.tool===this.tool){
+      // First click anchored a zero-size tool. The next click supplies its
+      // secondary datum; no additional mouse drag is required.
+      const pending=this.pendingDraw;
+      const to=this.maybeSnap(this.world(point),event);
+      const draft=draftProfile(newId("sketch"),pending.tool,pending.from,to,
+        event.shiftKey||pending.shift,this.prefs.polygon,this.slotRadius);
+      if(!draft){
+        this.events.onStatus("Choose a second point with nonzero dimensions · Esc cancels");
+      }else{
+        this.cancelPendingDraw(false);
+        this.events.onCreate(draft);
+      }
+      this.draw();return;
     }else if(this.extrude&&this.arrowScreen()&&distance(point,this.arrowScreen()!)<=16){
       this.gesture={kind:"depth",startY:point.y,startDepth:this.extrude.depth};
     }else if(this.tool==="line"){
@@ -253,8 +287,14 @@ export class SketchCanvas {
     if(this.tool==="line"&&this.linePoints.length)
       this.lineCursor=this.maybeSnap(this.world(screen),event);
     if(!this.gesture){
+      if(this.pendingDraw){
+        this.pendingDraw.to=this.maybeSnap(this.world(screen),event);
+        this.pendingDraw.shift=event.shiftKey;
+      }
       const hovered=this.hitProfile(this.world(screen));
-      if(hovered!==this.hover||this.tool==="line"){this.hover=hovered;this.draw();}
+      if(hovered!==this.hover||this.tool==="line"||this.pendingDraw){
+        this.hover=hovered;this.draw();
+      }
       return;
     }
     const g=this.gesture;
@@ -291,27 +331,20 @@ export class SketchCanvas {
     try{
       if(g.kind==="draw"){
         const to=this.maybeSnap(this.world(this.screen(event)),event);
-        const dx=to.x-g.from.x,dy=to.y-g.from.y;
-        if(g.tool==="rectangle"||g.tool==="centerRectangle"){
-          let width=Math.abs(dx),height=Math.abs(dy);
-          if(g.shift||event.shiftKey){const s=Math.max(width,height);width=s;height=s;}
-          if(width>1e-6&&height>1e-6){
-            const centred=g.tool==="centerRectangle";
-            this.events.onCreate({id:newId("rect"),kind:"rectangle",
-              x:centred?g.from.x-width:Math.min(g.from.x,g.from.x+Math.sign(dx||1)*width),
-              y:centred?g.from.y-height:Math.min(g.from.y,g.from.y+Math.sign(dy||1)*height),
-              width:centred?width*2:width,height:centred?height*2:height});
-          }
-        }else if(g.tool==="circle"){
-          const radius=distance(g.from,to);
-          if(radius>1e-6)this.events.onCreate({id:newId("circle"),kind:"circle",x:g.from.x,y:g.from.y,radius});
-        }else if(g.tool==="polygon"){
-          const radius=distance(g.from,to);
-          if(radius>1e-6)this.events.onCreate({id:newId("polygon"),kind:"polygon",
-            x:g.from.x,y:g.from.y,radius,sides:this.prefs.polygon.sides,rotation:this.prefs.polygon.rotation});
-        }else if(g.tool==="slot"){
-          if(distance(g.from,to)>1e-6)this.events.onCreate({
-            id:newId("slot"),kind:"slot",x1:g.from.x,y1:g.from.y,x2:to.x,y2:to.y,radius:this.slotRadius});
+        const result=draftProfile(newId("sketch"),g.tool,g.from,to,
+          g.shift||event.shiftKey,this.prefs.polygon,this.slotRadius);
+        if(result){
+          this.cancelPendingDraw(false);
+          this.events.onCreate(result);
+        }else{
+          // A click (or snap-collapsed/minor drag) establishes the first datum.
+          // Preserve it and rubber-band to the moving cursor until a second
+          // click establishes dimensions. Do not create an invalid 0×0 part.
+          this.pendingDraw={kind:"draw",tool:g.tool,from:g.from,to:g.from,
+            shift:g.shift||event.shiftKey};
+          this.canvas.dataset.drawStage="await-second-click";
+          this.canvas.dataset.drawTool=g.tool;
+          this.events.onStatus("First point fixed · click second point to finish · Esc cancels");
         }
       }else if(g.kind==="groupMove"){
         if(g.previews.some((p,i)=>JSON.stringify(p)!==JSON.stringify(g.originals[i]))){
@@ -389,27 +422,26 @@ export class SketchCanvas {
     }
   }
   private paintDraft(g:Extract<Gesture,{kind:"draw"}>):void {
-    const dx=g.to.x-g.from.x,dy=g.to.y-g.from.y;
-    let p:Profile|null=null;
-    if(g.tool==="rectangle"||g.tool==="centerRectangle"){
-      let w=Math.abs(dx),h=Math.abs(dy);
-      if(g.shift){const s=Math.max(w,h);w=s;h=s;}
-      const centered=g.tool==="centerRectangle";
-      p={id:"draft",kind:"rectangle",
-        x:centered?g.from.x-w:Math.min(g.from.x,g.from.x+Math.sign(dx||1)*w),
-        y:centered?g.from.y-h:Math.min(g.from.y,g.from.y+Math.sign(dy||1)*h),
-        width:centered?2*w:w,height:centered?2*h:h};
-    }else if(g.tool==="circle")p={id:"draft",kind:"circle",x:g.from.x,y:g.from.y,radius:distance(g.from,g.to)};
-    else if(g.tool==="polygon")p={id:"draft",kind:"polygon",x:g.from.x,y:g.from.y,radius:distance(g.from,g.to),
-      sides:this.prefs.polygon.sides,rotation:this.prefs.polygon.rotation};
-    else if(distance(g.from,g.to)>1e-7)p={id:"draft",kind:"slot",x1:g.from.x,y1:g.from.y,
-      x2:g.to.x,y2:g.to.y,radius:this.slotRadius};
-    if(p&&outline(p).every(pt=>Number.isFinite(pt.x)&&Number.isFinite(pt.y)))this.paintShape(p,false,false,true);
+    const p=draftProfile("draft",g.tool,g.from,g.to,g.shift,
+      this.prefs.polygon,this.slotRadius);
+    if(p&&outline(p).every(pt=>Number.isFinite(pt.x)&&Number.isFinite(pt.y)))
+      this.paintShape(p,false,false,true);
     const screen=this.toScreen(g.to);
-    this.ctx.font="12px ui-monospace,monospace";this.ctx.textAlign="left";this.ctx.fillStyle="#ffc786";
-    this.ctx.fillText((g.tool==="rectangle"||g.tool==="centerRectangle"
-      ?fmt(Math.abs(dx))+" × "+fmt(Math.abs(dy))+" mm"
-      :fmt(distance(g.from,g.to))+" mm"),screen.x+12,screen.y-12);
+    this.ctx.font="12px ui-monospace,monospace";
+    this.ctx.textAlign="left";this.ctx.fillStyle="#ffc786";
+    const label=p?.kind==="rectangle"
+      ?fmt(p.width)+" × "+fmt(p.height)+" mm"
+      :fmt(distance(g.from,g.to))+" mm";
+    this.ctx.fillText(label,screen.x+12,screen.y-12);
+    if(this.pendingDraw){
+      const first=this.toScreen(g.from);
+      this.ctx.strokeStyle="#ffcd90";this.ctx.lineWidth=2;
+      this.ctx.beginPath();this.ctx.arc(first.x,first.y,6,0,Math.PI*2);this.ctx.stroke();
+      this.ctx.fillStyle="#ffc786";
+      this.ctx.fillText("Click second point · Esc cancels",
+        Math.max(12,Math.min(this.width-225,first.x+12)),
+        Math.max(25,first.y-15));
+    }
   }
   private paintLine():void {
     if(!this.linePoints.length)return;
@@ -446,6 +478,8 @@ export class SketchCanvas {
     ctx.fillText("↕ "+fmt(this.extrude.depth)+" mm",end.x+16,end.y+4);
   }
   draw():void {
+    this.canvas.dataset.viewPanX=String(this.panX);
+    this.canvas.dataset.viewPanY=String(this.panY);
     const ctx=this.ctx;
     ctx.clearRect(0,0,this.width,this.height);
     ctx.fillStyle="#0b1422";ctx.fillRect(0,0,this.width,this.height);
@@ -458,6 +492,7 @@ export class SketchCanvas {
         preview?.id===p.id||Boolean(group?.has(p.id)));
     }
     if(this.gesture?.kind==="draw")this.paintDraft(this.gesture);
+    else if(this.pendingDraw)this.paintDraft(this.pendingDraw);
     this.paintLine();this.paintExtrude();
     if(this.highlightedSnap){
       const pt=this.toScreen(this.highlightedSnap);
