@@ -714,6 +714,7 @@ const MENU:Record<string,[string,string][]> = {
  view:[["Pan","tool.pan"],["Grid and snapping…","dialog.grid"],["Profile list","view.profiles"],
    ["Properties","view.properties"],["History","view.history"]],
  settings:[["Keyboard shortcuts…","dialog.shortcuts"],["Grid and snapping…","dialog.grid"],
+   ["CAD navigation controls…","dialog.navigation"],
    ["Export settings JSON","prefs.export"],["Import settings JSON","prefs.import"],["Reset settings","prefs.reset"]]
 };
 function closeMenu():void{activeMenu=null;byId("menu-popover").hidden=true;}
@@ -756,6 +757,7 @@ function command(action:string):void{
     case "file.step":void exportStep();break;
     case "dialog.shortcuts":showShortcuts();break;
     case "dialog.grid":showGrid();break;
+    case "dialog.navigation":showNavigation();break;
     case "prefs.export":exportSettings();break;
     case "prefs.import":input("settings-input").click();break;
     case "prefs.reset":prefs=defaultPreferences();persistPreferences();status("Settings reset to defaults");break;
@@ -785,6 +787,18 @@ function renderShortcuts():void {
     };
     row.append(title,key,clear);area.append(row);
   }
+}
+function showNavigation():void{
+  closeMenu();
+  const control=select("navigation-preset");
+  control.replaceChildren();
+  for(const preset of NAVIGATION_PRESETS){
+    const option=document.createElement("option");option.value=preset;
+    option.textContent=NAVIGATION_LABELS[preset];control.append(option);
+  }
+  control.value=prefs.navigation;
+  byId("navigation-hint").textContent=NAVIGATION_HINTS[prefs.navigation];
+  dialog("navigation-dialog").showModal();
 }
 function showGrid():void{
   closeMenu();renderGrid();dialog("grid-dialog").showModal();
@@ -825,7 +839,7 @@ function renderGrid():void{
 }
 function exportSettings():void {
   download(new Blob([JSON.stringify(prefs,null,2)],{type:"application/json"}),"flatcad-settings.json");
-  status("Keyboard, grid and polygon defaults exported");
+  status("Keyboard, grid, polygon and mouse navigation settings exported");
 }
 async function importSettings(file:File):Promise<void>{
   if(file.size>100000)throw new Error("Settings JSON exceeds 100 KB");
@@ -834,10 +848,19 @@ async function importSettings(file:File):Promise<void>{
   renderToolOptions();
   if(dialog("shortcuts-dialog").open)renderShortcuts();
   if(dialog("grid-dialog").open)renderGrid();
+  if(dialog("navigation-dialog").open){
+    select("navigation-preset").value=prefs.navigation;
+    byId("navigation-hint").textContent=NAVIGATION_HINTS[prefs.navigation];
+  }
   status("Settings imported and applied");
 }
 
 // UI events. All menu commands reuse the exact same implementations as direct controls.
+select("navigation-preset").onchange=()=>{
+  prefs=validatePreferences({...prefs,navigation:select("navigation-preset").value as NavigationPreset});
+  persistPreferences();
+  byId("navigation-hint").textContent=NAVIGATION_HINTS[prefs.navigation];
+};
 document.querySelectorAll<HTMLButtonElement>("[data-menu]").forEach(el=>{
   el.onclick=()=>openMenu(el.dataset.menu!);
 });
@@ -876,16 +899,18 @@ input("extrude-depth").oninput=()=>{
   if(!extrudeTarget)return;
   const depth=Number(input("extrude-depth").value);
   input("extrude-through").checked=false;
-  if(resolveMode()==="cut"&&lastStats&&Number.isFinite(depth)){
-    input("extrude-z").value=String(lastStats.boundsMm[1][2]-depth);
-  }
-  canvas.setExtrudeHandle({id:extrudeTarget,depth:depth||8});
+  // Never silently rewrite an explicit/face-picked start plane.
+  if(Number.isFinite(depth)&&depth!==0)
+    canvas.setExtrudeHandle({id:extrudeTarget,depth});
+  positionExtrudeMenu();
   scheduleOperationPreview();
 };
 input("extrude-z").oninput=()=>{
   input("extrude-through").checked=false;
   scheduleOperationPreview();
 };
+input("extrude-z").addEventListener("focus",()=>{facePickField="z";});
+input("extrude-depth").addEventListener("focus",()=>{facePickField="depth";});
 button("undo").onclick=()=>undoRedo(historyIndex-1);
 button("redo").onclick=()=>undoRedo(historyIndex+1);
 input("document-name").onchange=()=>safe(()=>change(validateDocument({...doc,name:input("document-name").value.trim()})));
@@ -931,7 +956,7 @@ document.addEventListener("keydown",event=>{
     }catch(error){byId("shortcut-error").textContent=String(error);}
     return;
   }
-  if(dialog("shortcuts-dialog").open||dialog("grid-dialog").open)return;
+  if(dialog("shortcuts-dialog").open||dialog("grid-dialog").open||dialog("navigation-dialog").open)return;
   if(!byId("extrude-flyout").hidden){
     if(event.code==="Escape"){event.preventDefault();closeExtrude();setTool("select");return;}
     if(event.code==="Enter"){event.preventDefault();applyExtrude();return;}
@@ -953,7 +978,7 @@ document.addEventListener("keydown",event=>{
 });
 document.addEventListener("keydown",event=>{
   if(event.code==="Space"&&!event.repeat&&!(event.target as HTMLElement).closest("input,textarea,select")&&
-    !dialog("shortcuts-dialog").open&&!dialog("grid-dialog").open){
+    !dialog("shortcuts-dialog").open&&!dialog("grid-dialog").open&&!dialog("navigation-dialog").open){
     if(activeTool!=="pan"){event.preventDefault();priorTool=activeTool;setTool("pan");}
   }
 });
@@ -962,6 +987,12 @@ document.addEventListener("keyup",event=>{
   if(event.code==="Space"&&priorTool){setTool(priorTool);priorTool=null;}
 });
 window.addEventListener("storage",event=>{
-  if(event.key===PREFS_KEY){prefs=loadPreferences();canvas.setPreferences(prefs);}
+  if(event.key===PREFS_KEY){
+    prefs=loadPreferences();canvas.setPreferences(prefs);
+    preview?.setNavigationPreset(prefs.navigation);
+    byId("extrude-nav-hint").textContent=NAVIGATION_HINTS[prefs.navigation];
+  }
 });
+byId("extrude-nav-hint").textContent=NAVIGATION_HINTS[prefs.navigation];
+window.addEventListener("resize",()=>positionExtrudeMenu());
 setTool(activeTool);render();rebuild();
