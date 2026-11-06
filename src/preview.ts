@@ -96,7 +96,7 @@ export class Preview {
     this.container.dataset.navigationPreset=preset;
     // No LMB navigation in CAD-style presets. LMB is reserved for face picks
     // and potential direct 3D selection; wheel remains zoom via OrbitControls.
-    this.orbit.mouseButtons.LEFT=-1;
+    this.orbit.mouseButtons.LEFT=null;
     this.orbit.mouseButtons.MIDDLE=this.toMouseAction(dragAction(preset,1,{shift:false,ctrl:false}));
     this.orbit.mouseButtons.RIGHT=this.toMouseAction(dragAction(preset,2,{shift:false,ctrl:false}));
   }
