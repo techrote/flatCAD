@@ -7,7 +7,7 @@
 - All authoring takes place on a single fixed XY plane, in millimetres (right-handed coordinates). +Z represents depth out of that plane.
 - 2D viewport +Y points upward. Pointer-to-world mapping must invert browser canvas Y.
 - Each sketch profile has a persistent ID and exact scalar parameters. Rectangles use lower-left x/y and positive width/height; circles use centre x/y and positive radius. V2 adds regular polygons, round-ended slots and open/closed polylines; V1 rectangles/circles migrate at load.
-- Feature history is an ordered list of {profileId, operation, z, depth}. Z is the lower extent, depth is positive. Feature evaluation is sequential. A cut is allowed only after an additive feature.
+- Feature history is an ordered list of {profileId, operation, z, depth}. **Z is the operation's Start Z plane and Depth is a nonzero signed displacement**; the occupied interval is [min(z,z+depth), max(z,z+depth)]. Existing positive-depth v1/v2 documents retain their original geometry. The exact kernel constructs positive-height solids over that interval, avoiding negative extrusion orientation ambiguity. Evaluation remains sequential; a cut requires a prior additive feature.
 - A profile can be reused by multiple features. Changing its parameters regenerates all dependent features. Deleting a referenced profile must either remove its dependent features explicitly or be rejected.
 - Native format uses schemaVersion=2 and units='mm' (and loads legacy v1). Unknown versions and malformed input fail closed. User preferences are stored separately from native model documents.
 

@@ -100,3 +100,20 @@ The popover also retains the exact numerical operation mode, start Z and depth, 
 - Compare exact B-rep volume in provisional Add/Cut preview to base geometry; turning preview off and cancelling cannot alter the saved native feature history.
 - Drag the arrowhead and verify provisional depth changes before committing.
 - Test worker errors, pending requests, rapid edits and stale response suppression on real browsers; stress and slow-worker qualification remain open.
+
+## Cursor-corner extrusion, face-picked dimensions and signed depths — ADR-0003 (2026-11-06)
+
+This section supersedes the previous **major-grid-based extrusion flyout placement**. The popup is anchored by a corner to the last pointer position in the sketch when invoked with E; clicking a profile using the extrusion tool uses the click coordinate. Prefer the upper-left corner unless the viewport requires a different corner. Sketch-outline overlap is permitted. If the popup covers the amber depth arrow, move it horizontally clear of that arrow when there is sufficient room. Preserve the initiating anchor while clicking 3D faces or editing numeric inputs.
+
+The feature document stores Start Z and a *signed* Depth; both are physical mm. End Z = Start Z + Depth, with nonzero Depth required. A downwards cut from Start Z 8 to End Z 2 is Depth −6, *not* Start Z 14 with Depth −6. The kernel transforms every signed span into an exact positive-height B-rep interval, so old upward features remain bitwise-equivalent in document parameters.
+
+**Focus-driven 3D face picking:** While the extrusion flyout is open, focus Start Z or Depth, then left-click a **horizontal planar face** of the *committed* solid preview. The input stays armed as the user clicks the 3D canvas. The application raycasts the committed B-rep-derived surface mesh, accepts only horizontal triangles at known feature elevations, and snaps its displayed Z to the exact source plane. Start Z is assigned the chosen plane. Depth is assigned **face Z − current Start Z**, permitting negative values. Zero-depth selections are rejected. Clicking a sloped/curved face does not silently invent a Z plane. Pending previews are display-only and cannot affect the committed face picker. Cursor navigation remains a separate concern: dragging the middle button pans/orbits, not face-picks.
+
+**Navigation profiles** in Settings → CAD navigation controls, saved with the same validated local settings JSON:
+- Fusion (default): middle-drag pans, Shift+middle-drag orbits; wheel zooms.
+- SOLIDWORKS: middle-drag orbits, Ctrl+middle-drag pans, Shift+middle-drag zooms.
+- Onshape: right-drag orbits, middle-drag or Ctrl+right-drag pans.
+- Blender: middle-drag orbits, Shift+middle-drag pans.
+All presets reserve left-click to pick rather than rotate. A normal scroll wheel zoom remains enabled; compatibility remains subject to human Windows/Firefox verification. Reference controls: https://help.autodesk.com/view/fusion360/ENU/?contextId=GS-SET-PREFERENCES , https://help.solidworks.com/2021/english/SolidWorks/sldworks/r_Middle_Mouse_Button.htm , https://cad.onshape.com/help/Content/View/view_navigation_and_the_view_cube.htm .
+
+**Acceptance:** browser-test cursor anchoring (including sketch-overlap and handle avoidance), negative-depth exact bounds and volume, face-pick autofill of Start Z and signed Depth, mouse navigation modifiers, settings migration and persistence, and preview cancel with no native-document changes. Do not report full 3D geometry selection: only horizontal B-rep-derived face elevation picking is implemented.
