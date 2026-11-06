@@ -90,9 +90,14 @@ export class SketchCanvas {
       this.events.onStatus("Outline is self-intersecting or has zero area · edit vertices and retry");
       return false;
     }
+    // Clear before invoking callback: onCreate selects the new profile and switches
+    // out of line mode, which would otherwise re-enter finishLine recursively.
+    this.linePoints=[];this.lineCursor=null;
     try{
       this.events.onCreate({id:newId("path"),kind:"path",points,closed:close});
-      this.linePoints=[];this.lineCursor=null;
+    }catch(error){
+      this.linePoints=points;
+      throw error;
     }finally{this.draw();}
     return true;
   }
