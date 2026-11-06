@@ -436,20 +436,113 @@ function renderToolOptions():void {
 function textNode(text:string):HTMLElement{
   const el=document.createElement("strong");el.textContent=text;return el;
 }
+function restoreCommittedPreview():void {
+  const host=byId("preview");
+  delete host.dataset.previewState;
+  delete host.dataset.previewVolumeMm3;
+  delete host.dataset.previewOperation;
+  byId("solid-preview-status").hidden=true;
+  preview?.setMesh(committedBuild?.mesh??null,{preserveCamera:true});
+}
 function closeExtrude():void {
-  extrudeTarget=null;byId("extrude-flyout").hidden=true;canvas.setExtrudeHandle(null);
+  ++previewToken;
+  clearTimeout(previewTimer);
+  extrudeTarget=null;
+  extrudeTargets=[];
+  byId("extrude-flyout").hidden=true;
+  canvas.setExtrudeHandle(null);
+  restoreCommittedPreview();
 }
 function throughAllBounds():[number,number] {
   if(lastStats)return [lastStats.boundsMm[0][2]-1,lastStats.boundsMm[1][2]+1];
-  if(doc.features.length)return [Math.min(...doc.features.map(f=>f.z))-1,
-    Math.max(...doc.features.map(f=>f.z+f.depth))+1];
+  if(doc.features.length)return [
+    Math.min(...doc.features.map(f=>f.z))-1,
+    Math.max(...doc.features.map(f=>f.z+f.depth))+1
+  ];
   return [-1,9];
 }
 function resolveMode(): "add" | "cut" {
   const manual=select("extrude-mode").value;
   if(manual==="add"||manual==="cut")return manual;
-  const p=getProfile(extrudeTarget);
-  return p?suggestOperation(doc,p):"add";
+  return suggestGroupOperation(doc,extrudeTargets);
+}
+function positionExtrudeMenu():void {
+  if(!extrudeTargets.length)return;
+  const flyout=byId("extrude-flyout");
+  if(flyout.hidden)return;
+  const viewport=canvas.getViewport();
+  const fallback=canvas.getSelectedPoint()??{x:viewport.width/2,y:viewport.height/2};
+  const selection=canvas.getSelectionBounds()??{
+    left:fallback.x,top:fallback.y,right:fallback.x,bottom:fallback.y
+  };
+  const majorGridPixels=prefs.grid.tiers[2].spacing*canvas.getZoom();
+  const result=placeExtrudeMenu({
+    viewport,selection,
+    popup:{width:flyout.offsetWidth||258,height:flyout.offsetHeight||290},
+    arrow:canvas.getExtrudeArrowScreen(),
+    majorGridPixels
+  });
+  flyout.style.left=result.x+"px";
+  flyout.style.top=result.y+"px";
+  flyout.dataset.placementSide=result.side;
+  flyout.dataset.majorGridPixels=String(majorGridPixels);
+}
+function previewError(error:unknown):void {
+  const label=byId("extrude-preview-error");
+  label.hidden=false;
+  label.textContent=error instanceof Error?error.message:String(error);
+}
+function scheduleOperationPreview():void {
+  const token=++previewToken;
+  clearTimeout(previewTimer);
+  const error=byId("extrude-preview-error");
+  error.hidden=true;error.textContent="";
+  if(!extrudeTargets.length||!input("extrude-preview").checked){
+    restoreCommittedPreview();
+    return;
+  }
+  const host=byId("preview");
+  const label=byId("solid-preview-status");
+  label.hidden=false;label.textContent="CALCULATING PREVIEW…";
+  host.dataset.previewState="loading";
+  delete host.dataset.previewVolumeMm3;
+  delete host.dataset.previewOperation;
+  const source=doc,ids=[...extrudeTargets],mode=resolveMode();
+  const z=Number(input("extrude-z").value),depth=Number(input("extrude-depth").value);
+  previewTimer=setTimeout(async()=>{
+    if(token!==previewToken)return;
+    let candidate:CadDocument;
+    try{
+      candidate=documentWithExtrusions(source,ids,mode,z,depth);
+    }catch(e){
+      if(token===previewToken){restoreCommittedPreview();previewError(e);}
+      return;
+    }
+    // A single in-flight preview plus debouncing prevents unbounded worker queues
+    // during continuous dragging. Only the newest request is ever displayed.
+    if(previewInFlight)return;
+    previewInFlight=true;
+    try{
+      const result=await kernel.build(candidate);
+      if(token!==previewToken||doc!==source||!extrudeTargets.length||!input("extrude-preview").checked)return;
+      preview?.setMesh(result.mesh,{pending:mode,preserveCamera:true});
+      host.dataset.previewState="ready";
+      host.dataset.previewOperation=mode;
+      if(result.statistics)host.dataset.previewVolumeMm3=String(result.statistics.volumeMm3);
+      label.hidden=false;
+      label.textContent="PREVIEW · "+mode.toUpperCase()+" · NOT APPLIED";
+    }catch(e){
+      if(token===previewToken){
+        restoreCommittedPreview();
+        previewError("Preview failed: "+String(e));
+      }
+    }finally{
+      previewInFlight=false;
+      if(token!==previewToken&&extrudeTargets.length&&input("extrude-preview").checked){
+        scheduleOperationPreview();
+      }
+    }
+  },250);
 }
 function updateExtrudeMode():void {
   if(!extrudeTarget)return;
@@ -457,8 +550,15 @@ function updateExtrudeMode():void {
   const autoOption=select("extrude-mode").options[0];
   autoOption.textContent="Auto → "+(mode==="cut"?"Cut":"Add");
   const thru=input("extrude-through");
+  const hadThrough=thru.checked;
   thru.disabled=mode!=="cut"||doc.features.length===0;
-  if(thru.disabled)thru.checked=false;
+  if(thru.disabled){
+    thru.checked=false;
+    if(hadThrough){
+      input("extrude-z").value="0";
+      input("extrude-depth").value="8";
+    }
+  }
   if(mode==="cut"&&doc.features.length&&!thru.checked){
     const [lo,hi]=throughAllBounds();
     input("extrude-z").value=String(lo);
@@ -466,38 +566,54 @@ function updateExtrudeMode():void {
     thru.checked=true;
   }
   canvas.setExtrudeHandle({id:extrudeTarget,depth:Number(input("extrude-depth").value)||8});
+  positionExtrudeMenu();
+  scheduleOperationPreview();
 }
-function openExtrude(id?:string,operation?:"add"|"cut",at?:Point2):void {
-  const selected=id||selectedId;
-  if(!selected){setTool("extrude");status("Click a closed shape to extrude or cut");return;}
-  const profile=getProfile(selected);
-  if(!profile||!isClosed(profile)){status("Open lines cannot be extruded. Close the path first.",true);return;}
-  closeMenu();selectedId=selected;activeTool="extrude";canvas.setTool("extrude");
-  document.querySelectorAll<HTMLButtonElement>("[data-tool]").forEach(el=>el.classList.toggle("active",el.dataset.tool==="extrude"));
-  extrudeTarget=selected;
+function openExtrude(id?:string,operation?:"add"|"cut",_at?:Point2):void {
+  const ids = id ? (selectedIds.includes(id) ? [...selectedIds] : [id]) : [...selectedIds];
+  if(!ids.length){
+    setTool("extrude");status("Click a closed shape to extrude or cut");
+    return;
+  }
+  const targets=selectedProfiles(doc,ids);
+  if(targets.length!==ids.length||targets.some(p=>!isClosed(p))){
+    status("Only closed, valid sketch profiles can be extruded. Close any open lines first.",true);
+    return;
+  }
+  closeMenu();
+  // Close a prior flyout to cancel any pending preview and restore the base mesh.
+  closeExtrude();
+  selectedIds=ids;selectedId=id??ids.at(-1)??null;
+  activeTool="extrude";
+  canvas.setTool("extrude");
+  document.querySelectorAll<HTMLButtonElement>("[data-tool]").forEach(el=>
+    el.classList.toggle("active",el.dataset.tool==="extrude"));
+  extrudeTargets=ids;
+  extrudeTarget=selectedId;
   const flyout=byId("extrude-flyout");
   flyout.hidden=false;
-  byId("extrude-target").textContent=profile.kind+" · "+selected.slice(0,12);
-  selectMode(operation||"auto");
-  input("extrude-z").value="0";input("extrude-depth").value="8";input("extrude-through").checked=false;
+  byId("extrude-target").textContent=ids.length>1?
+    ids.length+" profiles selected":targets[0].kind+" · "+ids[0].slice(0,12);
+  select("extrude-mode").value=operation||"auto";
+  input("extrude-z").value="0";
+  input("extrude-depth").value="8";
+  input("extrude-through").checked=false;
+  input("extrude-preview").checked=previewEnabled;
   updateExtrudeMode();
-  // Keep popover in viewport, close to the sketch geometry where invoked.
-  const wrap=byId("sketch-wrap").getBoundingClientRect();
-  const centrePoint=at||canvas.getSelectedPoint()||{x:wrap.width*.5,y:wrap.height*.5};
-  const posX=Math.max(90,Math.min(wrap.width-280,centrePoint.x+24));
-  const posY=Math.max(16,Math.min(wrap.height-290,centrePoint.y-45));
-  flyout.style.left=posX+"px";flyout.style.top=posY+"px";
   render();
   input("extrude-depth").focus();
 }
-function selectMode(mode:string):void{select("extrude-mode").value=mode;}
 function applyExtrude():void {
-  if(!extrudeTarget)return;
+  if(!extrudeTargets.length)return;
   const mode=resolveMode();
   const z=Number(input("extrude-z").value),depth=Number(input("extrude-depth").value);
+  const ids=[...extrudeTargets];
   safe(()=>{
-    const result=appendFeature(doc,{id:newId("feature"),profileId:extrudeTarget!,operation:mode,z,depth});
-    closeExtrude();change(result);setTool("select");
+    // One atomic document-history step for an arbitrary Ctrl-selected group.
+    const result=documentWithExtrusions(doc,ids,mode,z,depth);
+    closeExtrude();
+    change(result);
+    setTool("select");
   });
 }
 function toggleDetails(id:string):void{byId<HTMLDetailsElement>(id).open=true;closeMenu();}
