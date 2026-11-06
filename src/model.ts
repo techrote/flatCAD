@@ -64,7 +64,8 @@ export function validateDocument(input: unknown): CadDocument {
       failUnless(coordinate(p.x1)&&coordinate(p.y1)&&coordinate(p.x2)&&coordinate(p.y2)&&
         positive(p.radius),"invalid slot parameters");
       failUnless(Math.hypot(p.x2-p.x1,p.y2-p.y1)>1e-9,"slot endpoints cannot coincide");
-      failUnless([p.x1,p.y1,p.x2,p.y2].every(v=>Math.abs(v)+p.radius<=LIMIT),"slot outside extent");
+      const slotRadius = p.radius;
+      failUnless([p.x1,p.y1,p.x2,p.y2].every(v=>Math.abs(v)+slotRadius<=LIMIT),"slot outside extent");
       return {kind:"slot",id:p.id,x1:p.x1,y1:p.y1,x2:p.x2,y2:p.y2,radius:p.radius};
     }
     if(p.kind==="path"){
