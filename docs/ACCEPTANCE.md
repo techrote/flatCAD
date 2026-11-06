@@ -42,3 +42,7 @@ Blocked items and human acceptance:
 ~~~
 
 Never report a test as passing when only source inspection was performed.
+
+## Ctrl-selection, contextual extrusion and optional solid preview
+
+Automated tests must verify additive/toggle Ctrl-click selection, one-history-action group transforms/deletions and one-history-action multi-extrude; reject open paths without partial commits. The flyout must remain a major-grid interval from the selected geometry when viewport space permits, and avoid the arrowhead. Preview uses exact B-rep worker evaluation, must not modify localStorage/native document, must remain visibly labelled uncommitted, and must restore the committed mesh on cancellation or unchecked state. Change input rapidly to detect stale preview writes, and use volume/bbox checks to distinguish geometry work from a cosmetic-only visualization. These checks do not replace independent STEP round-trip or target-hardware acceptance.

@@ -55,7 +55,7 @@ export class Preview {
     this.camera.updateProjectionMatrix();
   }
 
-  setMesh(mesh: GeometryMesh | null): void {
+  setMesh(mesh: GeometryMesh | null, options: { pending?: "add" | "cut"; preserveCamera?: boolean } = {}): void {
     if (this.object) {
       this.scene.remove(this.object);
       this.object.traverse(node => {
@@ -78,7 +78,8 @@ export class Preview {
       geometry.computeVertexNormals();
     }
     group.add(new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
-      color: 0x6aacf4, metalness: 0.2, roughness: 0.58, side: THREE.DoubleSide
+      color: options.pending === "add" ? 0x73d1b8 : options.pending === "cut" ? 0xf2af7d : 0x6aacf4,
+      metalness: 0.2, roughness: 0.58, side: THREE.DoubleSide
     })));
     if (mesh.edgeLines.length) {
       const lines = new THREE.BufferGeometry();
@@ -88,7 +89,7 @@ export class Preview {
     this.scene.add(group);
     this.object = group;
     const bounds = new THREE.Box3().setFromObject(group);
-    if (!bounds.isEmpty()) {
+    if (!options.preserveCamera && !bounds.isEmpty()) {
       const center = bounds.getCenter(new THREE.Vector3());
       const radius = bounds.getSize(new THREE.Vector3()).length();
       this.orbit.target.copy(center);

@@ -189,3 +189,119 @@ test("L closes a multi-vertex outline by clicking its first vertex, then E extru
   data=await saveProject(page);
   expect(data.features).toHaveLength(1);
 });
+
+
+test("Ctrl+click adds two holes to selection; E applies two cuts atomically",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const b=(await page.locator("#sketch").boundingBox())!;
+  const cy=b.y+b.height/2;
+  await page.keyboard.down("Control");
+  await page.mouse.click(b.x+b.width/2-35*4,cy);
+  await page.mouse.click(b.x+b.width/2+35*4,cy);
+  await page.keyboard.up("Control");
+  await expect(page.locator("#selection-count")).toHaveText("2 selected");
+  await page.keyboard.press("e");
+  await expect(page.locator("#extrude-target")).toHaveText("2 profiles selected");
+  await expect(page.locator("#extrude-mode option").first()).toHaveText(/Auto.*Cut/);
+  await expect(page.locator("#extrude-through")).toBeChecked();
+  await expect(page.locator("#preview")).toHaveAttribute("data-preview-state","ready",{timeout:120000});
+  await expect(page.locator("#feature-count")).toContainText("3 operations");
+  // Opening and previewing the untouched built-in demo does not persist a new project.
+  expect(await page.evaluate(()=>localStorage.getItem("flatcad.project.v1"))).toBeNull();
+  await page.locator("#apply-extrude").click();
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const after=await saveProject(page);
+  expect(after.features).toHaveLength(5);
+  expect(after.features.slice(-2).map((f:{operation:string})=>f.operation)).toEqual(["cut","cut"]);
+  await page.keyboard.press("Control+z");
+  await expect(page.locator("#feature-count")).toContainText("3 operations");
+});
+
+test("major-grid flyout offset and optional exact-solid preview do not alter saved features",async({page})=>{
+  await page.goto("/");await newProject(page);
+  await page.keyboard.press("r");await draw(page,[.35,.38],[.60,.64]);
+  await page.keyboard.press("e");
+  await expect(page.locator("#extrude-flyout")).toBeVisible();
+  const flyout=page.locator("#extrude-flyout");
+  await expect(flyout).toHaveAttribute("data-major-grid-pixels","100");
+  await expect(flyout).toHaveAttribute("data-placement-side",/right|left|below|above/);
+  await expect(page.locator("#extrude-preview")).toBeChecked();
+  await expect(page.locator("#preview")).toHaveAttribute("data-preview-state","ready",{timeout:120000});
+  await expect(page.locator("#solid-preview-status")).toContainText("NOT APPLIED");
+  const provisional=Number(await page.locator("#preview").getAttribute("data-preview-volume-mm3"));
+  expect(provisional).toBeGreaterThan(0);
+  const before=await page.evaluate(()=>JSON.parse(localStorage.getItem("flatcad.project.v1")!));
+  expect(before.features).toHaveLength(0);
+  await page.locator("#extrude-preview").uncheck();
+  await expect(page.locator("#solid-preview-status")).toBeHidden();
+  await expect(page.locator("#preview")).not.toHaveAttribute("data-preview-state",/./);
+  await page.locator("#cancel-extrude").click();
+  const after=await page.evaluate(()=>JSON.parse(localStorage.getItem("flatcad.project.v1")!));
+  expect(after.features).toHaveLength(0);
+});
+
+test("dragging the extrusion arrow changes proposed depth and 3D volume before Apply",async({page})=>{
+  await page.goto("/");await newProject(page);
+  await page.keyboard.press("r");await draw(page,[.36,.40],[.57,.59]);
+  const draft=(await saveProject(page)).profiles[0];
+  await page.keyboard.press("e");
+  await expect(page.locator("#preview")).toHaveAttribute("data-preview-state","ready",{timeout:120000});
+  const originalVolume=Number(await page.locator("#preview").getAttribute("data-preview-volume-mm3"));
+  const b=(await page.locator("#sketch").boundingBox())!;
+  const px=b.x+b.width/2+(draft.x+draft.width/2)*4+22;
+  const py=b.y+b.height/2-(draft.y+draft.height/2)*4-35;
+  await page.mouse.move(px,py);
+  await page.mouse.down();
+  await page.mouse.move(px,py-40,{steps:7});
+  await page.mouse.up();
+  expect(Number(await page.locator("#extrude-depth").inputValue())).toBeGreaterThan(8);
+  await expect(page.locator("#preview")).toHaveAttribute("data-preview-state","ready",{timeout:120000});
+  const revisedVolume=Number(await page.locator("#preview").getAttribute("data-preview-volume-mm3"));
+  expect(revisedVolume).toBeGreaterThan(originalVolume);
+  const untouched=await page.evaluate(()=>JSON.parse(localStorage.getItem("flatcad.project.v1")!));
+  expect(untouched.features).toHaveLength(0);
+});
+
+
+test("Ctrl-selected profiles move, duplicate and delete as a group in atomic history steps",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const b=(await page.locator("#sketch").boundingBox())!;
+  const left=b.x+b.width/2-35*4, right=b.x+b.width/2+35*4, mid=b.y+b.height/2;
+  await page.keyboard.down("Control");
+  await page.mouse.click(left,mid);
+  await page.mouse.click(right,mid);
+  await page.keyboard.up("Control");
+  await expect(page.locator("#selection-count")).toHaveText("2 selected");
+  // Unmodified drag on an existing member preserves group selection.
+  await page.mouse.move(left,mid);
+  await page.mouse.down();
+  await page.mouse.move(left+20,mid,{steps:5});
+  await page.mouse.up();
+  const moved=await page.evaluate(()=>JSON.parse(localStorage.getItem("flatcad.project.v1")!));
+  expect(moved.profiles.find((p:{id:string})=>p.id==="hole_l").x).toBe(-30);
+  expect(moved.profiles.find((p:{id:string})=>p.id==="hole_r").x).toBe(40);
+  await page.keyboard.press("Control+d");
+  await expect(page.locator("#profile-count")).toContainText("5 profiles");
+  await expect(page.locator("#selection-count")).toHaveText("2 selected");
+  await page.keyboard.press("Delete");
+  await expect(page.locator("#profile-count")).toContainText("3 profiles");
+  await page.keyboard.press("Control+z");
+  await expect(page.locator("#profile-count")).toContainText("5 profiles");
+});
+
+test("extrusion flyout offset follows a modified major-grid spacing",async({page})=>{
+  await page.goto("/");
+  await page.keyboard.press("g");
+  await expect(page.locator("#grid-dialog")).toBeVisible();
+  await page.getByLabel("Major spacing mm").fill("12");
+  await page.getByLabel("Major spacing mm").press("Tab");
+  await page.locator('[data-close="grid-dialog"]').last().click();
+  await newProject(page);
+  await page.keyboard.press("r");
+  await draw(page,[.35,.38],[.56,.60]);
+  await page.keyboard.press("e");
+  await expect(page.locator("#extrude-flyout")).toBeVisible();
+  await expect(page.locator("#extrude-flyout")).toHaveAttribute("data-major-grid-pixels","48");
+});

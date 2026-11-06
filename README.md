@@ -28,6 +28,12 @@ Use the rectangle or circle tools to draw profiles, select a profile, and choose
 
 ## Direct workflow
 
+**Multi-select:** Hold Ctrl (or Command on macOS) and click sketch objects to add/remove them from a selection. Click a selected object normally to drag the selected group; Ctrl+D duplicates and Delete removes the group. Press E to extrude or cut all selected closed profiles in one undoable action.
+
+**Contextual extrusion:** The E popover is positioned one **major grid** distance beyond the selected profile(s), using the currently configured major spacing and viewport zoom. A triangular arrowhead acts as the draggable depth grip. The **Preview in solid view** checkbox shows a provisional OpenCascade B-rep recomputation, tinted by Add/Cut; disabling preview or cancelling restores the committed solid. Preview operations never modify the saved project until Apply.
+
+## Direct workflow
+
 Choose a tool from the sketch rail, or use L (line), R (rectangle), Shift+R (centre rectangle), C (circle), P (polygon), or S (slot). Drag a shape and select it; press **E** to open contextual extrusion/cut controls. The numeric flyout lets you override Add/Cut and exact depth; drag its amber on-canvas arrow for a faster depth adjustment. Open **Settings → Keyboard shortcuts** (K) for rebinding, clearing, resetting and JSON import/export. Open **Grid and snapping** (G) to configure all three grid tiers independently. Menus contain all corresponding commands; exact properties and history panels start collapsed.
 
 ## What is implemented
