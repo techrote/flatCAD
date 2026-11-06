@@ -8,7 +8,9 @@ describe("surface targeting and conservative feature deletion",()=>{
    expect(featureForSurface(DEMO,{...top,point:[-35,0,8]})).toBeNull();
  });
  it("pocket bottom resolves the cut feature from its exact source plane",()=>{
-   const doc=validateDocument({...DEMO,features:[...DEMO.features,{
+   // This specimen has a base but no preexisting through-hole; a pocket
+   // cannot create a floor in space already removed by a through-cut.
+   const doc=validateDocument({...DEMO,features:[DEMO.features[0],{
      id:"pocket",profileId:"hole_l",operation:"cut",z:8,depth:-6
    }]});
    expect(featureForSurface(doc,{kind:"face",point:[-35,0,2],z:2,normal:[0,0,1]})?.id).toBe("pocket");
