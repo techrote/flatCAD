@@ -79,7 +79,7 @@ export class Preview {
       // Short left click latches the armed numeric field. Short right click
       // requests a context menu. Drags are exclusively navigation gestures.
       if(event.button===0&&this.onFacePicked)
-        this.onFacePicked(this.pickTarget(event)?.z??null);
+        this.onFacePicked(this.pickTarget(event)?.target.z??null);
       if(event.button===2&&this.onSurfaceMenu)
         this.onSurfaceMenu(this.pickTarget(event)?.target??null,
           {x:event.clientX,y:event.clientY});
@@ -176,7 +176,7 @@ export class Preview {
     const positions=pick.geometry.getAttribute("position");
     const hits=this.raycaster.intersectObject(pick,false);
     for(const hit of hits){
-      if(!hit.face||hit.faceIndex===undefined)return null;
+      if(!hit.face||hit.faceIndex==null)return null;
       const triangle=hit.face;
       const v=[
         new THREE.Vector3().fromBufferAttribute(positions,triangle.a),
