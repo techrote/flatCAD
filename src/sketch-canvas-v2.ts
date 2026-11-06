@@ -1,5 +1,5 @@
 import { newId, type CadDocument, type Point2, type Profile } from "./model";
-import { centre, distance, handles, hit, isClosed, moveHandle, outline, snapPoints, translate } from "./geometry";
+import { centre, distance, handles, hit, isClosed, isSimplePolygon, moveHandle, outline, snapPoints, translate } from "./geometry";
 import type { Preferences } from "./preferences";
 
 export type SketchTool =
@@ -86,9 +86,14 @@ export class SketchCanvas {
     if(this.linePoints.length<2){this.cancelLine();return false;}
     if(close&&this.linePoints.length<3){this.events.onStatus("Closed outlines need three or more points");return false;}
     const points=this.linePoints;
-    this.linePoints=[];this.lineCursor=null;
-    try{this.events.onCreate({id:newId("path"),kind:"path",points,closed:close});}
-    finally{this.draw();}
+    if(close&&!isSimplePolygon(points)){
+      this.events.onStatus("Outline is self-intersecting or has zero area · edit vertices and retry");
+      return false;
+    }
+    try{
+      this.events.onCreate({id:newId("path"),kind:"path",points,closed:close});
+      this.linePoints=[];this.lineCursor=null;
+    }finally{this.draw();}
     return true;
   }
   private resize():void {
@@ -168,6 +173,8 @@ export class SketchCanvas {
         this.finishLine(true);
       }else if(event.detail>=2&&this.linePoints.length>=2){
         this.finishLine(false);
+      }else if(this.linePoints.length>=256){
+        this.events.onStatus("Polyline limit is 256 vertices; finish or close the line");
       }else if(!this.linePoints.length||distance(w,this.linePoints.at(-1)!)>1e-8){
         this.linePoints.push(w);this.lineCursor=w;
         this.events.onStatus("Click vertices · click start to close · Enter finish open · Esc cancel");
