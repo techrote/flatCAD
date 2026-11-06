@@ -146,3 +146,46 @@ test("three grid tiers and shortcut rebindings persist in exported settings JSON
   await page.keyboard.press("t");
   await expect(page.locator('[data-tool="rectangle"]')).toHaveClass(/active/);
 });
+
+test("E suggests a through-cut when a new circle lies within an extruded plate",async({page})=>{
+  await page.goto("/");await newProject(page);
+  await page.keyboard.press("r");
+  await draw(page,[.30,.30],[.70,.70]);
+  await page.keyboard.press("e");
+  await page.locator("#apply-extrude").click();
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const volumeBefore=Number(await page.locator("#status").getAttribute("data-volume-mm3"));
+  await page.keyboard.press("c");
+  await draw(page,[.50,.50],[.53,.50]);
+  await page.keyboard.press("e");
+  await expect(page.locator("#extrude-mode option").first()).toHaveText(/Auto.*Cut/);
+  await expect(page.locator("#extrude-through")).toBeChecked();
+  await page.locator("#apply-extrude").click();
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const volumeAfter=Number(await page.locator("#status").getAttribute("data-volume-mm3"));
+  expect(volumeAfter).toBeGreaterThan(0);
+  expect(volumeAfter).toBeLessThan(volumeBefore);
+  const data=await saveProject(page);
+  expect(data.features.map((f:{operation:string})=>f.operation)).toEqual(["add","cut"]);
+});
+
+test("L closes a multi-vertex outline by clicking its first vertex, then E extrudes it",async({page})=>{
+  await page.goto("/");await newProject(page);
+  await page.keyboard.press("l");
+  await expect(page.locator('[data-tool="line"]')).toHaveClass(/active/);
+  const box=(await page.locator("#sketch").boundingBox())!;
+  const coords:[[number,number],[number,number],[number,number],[number,number]]=[
+    [.40,.41],[.60,.41],[.59,.62],[.41,.60]
+  ];
+  for(const [x,y] of [...coords,coords[0]])await page.mouse.click(box.x+box.width*x,box.y+box.height*y);
+  await expect(page.locator("#profile-count")).toHaveText("1 profiles");
+  let data=await saveProject(page);
+  expect(data.profiles[0].kind).toBe("path");
+  expect(data.profiles[0].closed).toBe(true);
+  expect(data.profiles[0].points).toHaveLength(4);
+  await page.keyboard.press("e");
+  await page.locator("#apply-extrude").click();
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  data=await saveProject(page);
+  expect(data.features).toHaveLength(1);
+});
