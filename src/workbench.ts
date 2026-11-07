@@ -21,6 +21,9 @@ import { featureForSurface, formatSurfaceTarget, type SurfaceTarget } from "./su
 import { SketchCanvas, type SketchTool } from "./sketch-canvas-v2";
 import { KernelClient } from "./kernel-client";
 import { Preview } from "./preview";
+import { createRenderNav } from "./render-nav";
+import {loadRenderSettings,saveRenderSettings,validateRenderSettings,
+  DEFAULT_RENDER_SETTINGS,RENDER_SETTINGS_KEY,type RenderSettings} from "./render-settings";
 import {
   ACTION_LABELS, PREFS_KEY, chordFromEvent, defaultPreferences, displayShortcut,
   loadPreferences, savePreferences, validatePreferences, validateShortcut, DEFAULT_SKETCH_TEXT, SKETCH_FONT_FAMILIES,
@@ -40,6 +43,8 @@ root.innerHTML=[
   '      <button data-menu="sketch" class="menu-trigger">Sketch</button>',
   '      <button data-menu="model" class="menu-trigger">Model</button>',
   '      <button data-menu="view" class="menu-trigger">View</button>',
+  '      <button data-menu="layout" class="menu-trigger">Layout</button>',
+  '      <button data-menu="render" class="menu-trigger">Render</button>',
   '      <button data-menu="settings" class="menu-trigger">Settings</button>',
   '      <div id="menu-popover" class="menu-popover" hidden role="menu"></div>',
   '    </nav>',
@@ -152,7 +157,12 @@ root.innerHTML=[
   '<dialog id="layout-dialog" class="settings-dialog"><div class="dialog-head"><div><strong>Workspace tiles</strong><small>Rearrange the existing controls without changing CAD data</small></div><button data-close="layout-dialog">×</button></div>',
   '  <div class="dialog-scroll"><label class="field"><span>Desktop layout</span><select id="tile-mode"><option value="split">Sketch + Solid with inspector below</option><option value="columns">Three adjustable columns</option><option value="float">Float — transparent draggable solid</option></select></label>',
   '  <div id="tile-order" class="tile-order" aria-label="Tile arrangement"></div></div>',
-  '  <footer><button id="tile-reset" class="button">Reset workspace</button><button data-close="layout-dialog" class="button primary">Done</button></footer></dialog>'
+  '  <footer><button id="tile-reset" class="button">Reset workspace</button><button data-close="layout-dialog" class="button primary">Done</button></footer></dialog>',
+  '<dialog id="render-dialog" class="settings-dialog"><div class="dialog-head"><div><strong>Render</strong><small>Presentation only · exact CAD geometry unchanged</small></div><button data-close="render-dialog">×</button></div>',
+  '  <div class="dialog-scroll"><label class="check render-effect-option"><input id="render-ao" type="checkbox"> Ambient occlusion (SSAO)</label>',
+  '  <label class="field"><span>Resolution supersampling</span><select id="render-supersampling"><option value="1">Off · native</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>',
+  '  <small class="navigation-hint">Higher settings use more GPU memory; effective resolution is capped on large displays.</small></div>',
+  '  <footer><button id="render-reset" class="button">Reset render</button><button data-close="render-dialog" class="button primary">Done</button></footer></dialog>'
 ].join("\n");
 
 function byId<T extends HTMLElement=HTMLElement>(id:string):T{
@@ -189,6 +199,7 @@ function initialDocument():CadDocument{
 }
 let doc=initialDocument();
 let prefs=loadPreferences();
+let renderSettings=loadRenderSettings();
 let history:CadDocument[]=[doc],historyIndex=0;
 let selectedId:string|null=null,selectedIds:string[]=[],activeTool:SketchTool="select";
 let activeMenu:string|null=null;
@@ -396,7 +407,9 @@ requestAnimationFrame(positionDockCluster);
 let preview:Preview|null=null;
 try{
   const host=byId("preview");host.replaceChildren();preview=new Preview(host);
+  host.parentElement!.append(createRenderNav(preview));
   preview.setNavigationPreset(prefs.navigation);
+  preview.setRenderSettings(renderSettings);
   preview.setFacePickHandler(z=>{
     if(z!==null)lastSurfaceZ=z;
     fillFocusedFieldFromFace(z);
@@ -1140,10 +1153,12 @@ const MENU:Record<string,[string,string][]> = {
    ["Subtract extrusion","model.cut"],["Feature history","view.history"],
    ["Named parameters…","dialog.parameters"]],
  view:[["Pan","tool.pan"],["Fit Solid View","view.fit"],["Grid and snapping…","dialog.grid"],["Profile list","view.profiles"],
-   ["Properties","view.properties"],["History","view.history"],["Workspace tiles…","dialog.layout"],
+   ["Properties","view.properties"],["History","view.history"],
    ["Float solid","view.float"],["Dock solid","view.dock"],["Current solid","view.now"]],
+ layout:[["Workspace tiles…","dialog.layout"],["Float solid","view.float"],["Dock solid","view.dock"]],
+ render:[["Effects and antialiasing…","dialog.render"],["Toggle ambient occlusion","render.toggle-ao"]],
  settings:[["Keyboard shortcuts…","dialog.shortcuts"],["Grid and snapping…","dialog.grid"],
-   ["Sketch text…","dialog.text"],["Workspace tiles…","dialog.layout"],
+   ["Sketch text…","dialog.text"],
    ["CAD navigation controls…","dialog.navigation"],
    ["Toggle remember mouse surfaces","prefs.remember"],
    ["Export settings JSON","prefs.export"],["Import settings JSON","prefs.import"],["Reset settings","prefs.reset"]]
@@ -1192,6 +1207,10 @@ function command(action:string):void{
     case "dialog.navigation":showNavigation();break;
     case "dialog.text":showTextSettings();break;
     case "dialog.layout":showLayoutSettings();break;
+    case "dialog.render":showRenderSettings();break;
+    case "render.toggle-ao":
+      applyRenderSettings({...renderSettings,ambientOcclusion:!renderSettings.ambientOcclusion});
+      break;
     case "dialog.parameters":closeMenu();parameterManager.open();break;
     case "view.now":historyPanel.clearSelection();break;
     case "view.float":workspaceLayout.setTileMode("float");break;
@@ -1253,6 +1272,21 @@ function commitTextSettings():void{
     }});
     persistPreferences();
   }catch(error){status("Sketch font settings invalid: "+String(error),true);}
+}
+function applyRenderSettings(next:RenderSettings):void{
+  try{
+    renderSettings=validateRenderSettings(next);
+    saveRenderSettings(renderSettings);
+    preview?.setRenderSettings(renderSettings);
+    input("render-ao").checked=renderSettings.ambientOcclusion;
+    select("render-supersampling").value=String(renderSettings.supersampling);
+  }catch(error){status("Render settings invalid: "+String(error),true);}
+}
+function showRenderSettings():void{
+  closeMenu();
+  input("render-ao").checked=renderSettings.ambientOcclusion;
+  select("render-supersampling").value=String(renderSettings.supersampling);
+  dialog("render-dialog").showModal();
 }
 function showLayoutSettings():void{
   closeMenu();
@@ -1400,6 +1434,14 @@ button("timeline-now").onclick=()=>historyPanel.clearSelection();
 select("tile-mode").onchange=()=>{
   workspaceLayout.setTileMode(select("tile-mode").value as "split"|"columns"|"float");
 };
+input("render-ao").onchange=()=>applyRenderSettings({
+  ...renderSettings,ambientOcclusion:input("render-ao").checked
+});
+select("render-supersampling").onchange=()=>applyRenderSettings({
+  ...renderSettings,supersampling:
+    (Number(select("render-supersampling").value) as RenderSettings["supersampling"])
+});
+button("render-reset").onclick=()=>applyRenderSettings({...DEFAULT_RENDER_SETTINGS});
 button("tile-reset").onclick=()=>{
   workspaceLayout.resetArrangement();select("tile-mode").value=workspaceLayout.tileMode;
   renderLayoutTileOrder();
@@ -1500,7 +1542,7 @@ document.addEventListener("keydown",event=>{
     }catch(error){byId("shortcut-error").textContent=String(error);}
     return;
   }
-  if(["shortcuts-dialog","grid-dialog","navigation-dialog","text-dialog","layout-dialog","parameters-dialog"].some(x=>dialog(x).open))return;
+  if(["shortcuts-dialog","grid-dialog","navigation-dialog","text-dialog","layout-dialog","parameters-dialog","render-dialog"].some(x=>dialog(x).open))return;
   if(!byId("extrude-flyout").hidden){
     if(event.code==="Escape"){event.preventDefault();closeExtrude();setTool("select");return;}
     if(event.code==="Enter"){event.preventDefault();applyExtrude();return;}
@@ -1526,7 +1568,7 @@ document.addEventListener("keydown",event=>{
 });
 document.addEventListener("keydown",event=>{
   if(event.code==="Space"&&!event.repeat&&!(event.target as HTMLElement).closest("input,textarea,select")&&
-    !["shortcuts-dialog","grid-dialog","navigation-dialog","text-dialog","layout-dialog","parameters-dialog"].some(x=>dialog(x).open)){
+    !["shortcuts-dialog","grid-dialog","navigation-dialog","text-dialog","layout-dialog","parameters-dialog","render-dialog"].some(x=>dialog(x).open)){
     if(activeTool!=="pan"){event.preventDefault();priorTool=activeTool;setTool("pan");}
   }
 });
@@ -1535,6 +1577,10 @@ document.addEventListener("keyup",event=>{
   if(event.code==="Space"&&priorTool){setTool(priorTool);priorTool=null;}
 });
 window.addEventListener("storage",event=>{
+  if(event.key===RENDER_SETTINGS_KEY){
+    renderSettings=loadRenderSettings();
+    preview?.setRenderSettings(renderSettings);
+  }
   if(event.key===PREFS_KEY){
     prefs=loadPreferences();canvas.setPreferences(prefs);
     preview?.setNavigationPreset(prefs.navigation);
