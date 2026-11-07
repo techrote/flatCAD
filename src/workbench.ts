@@ -11,6 +11,7 @@ import { depthToFace } from "./signed-extrusion";
 import { NAVIGATION_HINTS, NAVIGATION_LABELS, NAVIGATION_PRESETS, type NavigationPreset } from "./navigation";
 import type { KernelBuild, KernelHistoryFrame } from "./kernel-protocol";
 import { FeatureHistoryPanel } from "./history-panel";
+import { WorkspaceLayoutController } from "./workspace-layout";
 import { featureForSurface, formatSurfaceTarget, type SurfaceTarget } from "./surface-interaction";
 import { SketchCanvas, type SketchTool } from "./sketch-canvas-v2";
 import { KernelClient } from "./kernel-client";
@@ -41,13 +42,22 @@ root.innerHTML=[
   '    <input type="file" id="project-input" accept=".json,.flatcad.json,application/json" hidden>',
   '    <input type="file" id="settings-input" accept=".json,application/json" hidden>',
   '  </header>',
-  '  <main class="workspace workbench-layout">',
+  '  <main id="workbench-layout" class="workspace workbench-layout">',
   '    <section class="panel sketch-section workbench-sketch">',
-  '      <div class="panel-head compact-head"><div class="header-label"><span class="panel-index">01</span><div><strong>Sketch</strong><small>Draw directly · XY plane</small></div></div>',
-  '        <span id="sketch-context" class="chip">Select <kbd>V</kbd></span></div>',
+  '      <div class="panel-head compact-head sketch-titlebar"><div class="header-label"><span class="panel-index">01</span><div><strong>Sketch</strong><small>XY · millimetres</small></div></div>',
+  '        <div id="tool-dock-slot" class="tool-dock-slot" aria-label="Docked sketch tools"></div>',
+  '        <span id="sketch-context" class="chip">Select</span>',
+  '        <div class="sketch-title-actions">',
+  '          <button id="tool-dock-toggle" class="text-button tool-dock-toggle" aria-pressed="false" title="Dock/undock sketch tools in title bar">⇥ Dock</button>',
+  '          <button id="grid-quick" class="text-button" title="Grid settings (G)">⊞ Grid</button>',
+  '          <span id="zoom" class="titlebar-zoom">4 px/mm</span>',
+  '          <span id="profile-count" class="titlebar-profiles">3 profiles</span>',
+  '          <button id="undo" class="titlebar-action" aria-label="Undo" title="Undo (Ctrl+Z)">↶</button>',
+  '          <button id="redo" class="titlebar-action" aria-label="Redo" title="Redo (Ctrl+Shift+Z)">↷</button>',
+  '        </div></div>',
   '      <div id="sketch-wrap" class="sketch-wrap">',
   '        <canvas id="sketch" aria-label="2D CAD sketch canvas">Canvas 2D is required</canvas>',
-  '        <div class="tool-rail" role="toolbar" aria-label="Sketching tools">',
+  '        <div id="sketch-tool-rail" class="tool-rail" role="toolbar" aria-label="Sketching tools">',
   '          <button data-tool="select" title="Select (V)" class="rail-tool active" aria-label="Select">↖</button>',
   '          <button data-tool="line" title="Line or polyline (L)" class="rail-tool" aria-label="Line">╱</button>',
   '          <button data-tool="rectangle" title="Corner rectangle (R)" class="rail-tool" aria-label="Rectangle">▭</button>',
@@ -83,32 +93,33 @@ root.innerHTML=[
   '        </section>',
   '        <div id="canvas-hint" class="canvas-hint">Select a shape or press a drawing shortcut</div>',
   '      </div>',
-  '      <div class="panel-footer"><button id="grid-quick" class="text-button">⊞ Grid <kbd>G</kbd></button>',
-  '        <span id="zoom" class="muted">4 px/mm</span><span id="profile-count" class="chip">3</span></div>',
   '    </section>',
-  '    <aside class="workbench-side">',
+  '    <div id="main-resizer" class="panel-resizer main-resizer" role="separator" tabindex="0" aria-label="Resize Sketch and Solid panels" aria-valuemin="10" aria-valuemax="90"></div>',
+  '    <aside id="workbench-side" class="workbench-side">',
   '      <section class="panel preview-panel">',
-  '        <div class="panel-head compact-head"><div class="header-label"><span class="panel-index">02</span><div><strong>Solid</strong><small>Orbit · zoom · inspect</small></div></div><div class="solid-view-actions"><button id="fit-solid" class="text-button" title="Fit solid (F)">⊞ Fit <kbd>F</kbd></button><span class="chip">Z ↑</span></div></div>',
+  '        <div class="panel-head compact-head solid-titlebar"><div class="header-label"><span class="panel-index">02</span><div><strong>Solid</strong><small>Orbit · zoom · inspect</small></div></div>',
+  '          <div class="solid-view-actions"><span id="solid-volume" class="solid-volume" title="Exact B-rep volume" aria-label="Solid volume">— mm³</span>',
+  '            <span id="status-dot" class="live-dot" title="CAD ready" aria-label="CAD status"></span>',
+  '            <button id="fit-solid" class="text-button" title="Fit solid (F)">⊞ Fit <kbd>F</kbd></button><span class="chip">Z ↑</span>',
+  '          </div></div>',
   '        <div id="preview" class="preview-root"><span class="placeholder">Loading 3D preview…</span></div>',
   '        <span id="face-target-label" class="face-target-label" hidden></span>',
   '        <div id="face-context-menu" class="face-context-menu" role="menu" hidden></div>',
   '        <span id="solid-preview-status" class="solid-preview-status" hidden>PREVIEW · NOT APPLIED</span>',
   '        <span id="cut-tool-metrics" class="cut-tool-metrics" hidden></span>',
+  '        <span id="status" class="status-feedback" role="status" aria-live="polite">Preparing workspace…</span>',
   '      </section>',
+  '      <div id="side-resizer" class="panel-resizer side-resizer" role="separator" tabindex="0" aria-label="Resize Solid and inspector panels" aria-valuemin="10" aria-valuemax="90"></div>',
   '      <div class="inspector-drawer">',
   '        <details id="properties-details" class="drawer"><summary>Properties <span id="selection-name" class="muted">Nothing selected</span></summary>',
   '          <div id="inspector" class="drawer-content"></div></details>',
-  '        <details id="history-details" class="drawer"><summary>Feature history <span id="feature-count" class="muted">0 operations</span></summary>',
-  '          <div id="feature-list" class="drawer-content"></div></details>',
+  '        <details id="history-details" class="drawer history-drawer"><summary>Feature history <span id="feature-count" class="muted">0 operations</span></summary>',
+  '          <div id="feature-list" class="drawer-content history-content"></div></details>',
   '        <details id="profiles-details" class="drawer"><summary>Profiles <span class="muted">Open list</span></summary>',
   '          <div id="profile-list" class="drawer-content"></div></details>',
   '      </div>',
   '    </aside>',
   '  </main>',
-  '  <footer class="statusbar"><span id="status-dot" class="live-dot"></span><span id="status" role="status">Preparing workspace…</span>',
-  '    <span class="status-right">PROTOTYPE · NOT FABRICATION QUALIFIED</span>',
-  '    <button id="undo" class="status-action" aria-label="Undo" title="Undo">↶</button>',
-  '    <button id="redo" class="status-action" aria-label="Redo" title="Redo">↷</button></footer>',
   '</div>',
   '<dialog id="shortcuts-dialog" class="settings-dialog"><div class="dialog-head"><div><strong>Keyboard shortcuts</strong><small>Click a key to rebind it. Empty means unassigned.</small></div><button data-close="shortcuts-dialog">×</button></div>',
   '  <div id="shortcut-rows" class="dialog-scroll"></div><div id="shortcut-error" role="alert" class="validation-error"></div>',
@@ -132,8 +143,22 @@ function button(id:string):HTMLButtonElement{return byId<HTMLButtonElement>(id);
 function input(id:string):HTMLInputElement{return byId<HTMLInputElement>(id);}
 function select(id:string):HTMLSelectElement{return byId<HTMLSelectElement>(id);}
 function status(message:string,error=false):void {
-  byId("status").textContent=message;
+  const notice=byId("status");
+  notice.textContent=message;
+  notice.classList.toggle("error",error);
   byId("status-dot").classList.toggle("error",error);
+  byId("status-dot").title=message;
+}
+function setVolume(volume:number|null,previewing=false):void{
+  const label=byId("solid-volume");
+  label.textContent=volume!==null&&Number.isFinite(volume)
+    ?(previewing?"Preview ":"")+volume.toLocaleString("en-GB",{
+      minimumFractionDigits:2,maximumFractionDigits:2})+" mm³"
+    :"— mm³";
+  label.dataset.mode=previewing?"preview":"committed";
+  if(volume!==null&&Number.isFinite(volume))
+    label.dataset.volumeMm3=String(volume);
+  else delete label.dataset.volumeMm3;
 }
 function initialDocument():CadDocument{
   try{
@@ -200,6 +225,20 @@ const canvas=new SketchCanvas(inputCanvas(),doc,prefs,{
   onStatus:message=>status(message)
 });
 function inputCanvas():HTMLCanvasElement{return byId<HTMLCanvasElement>("sketch");}
+function changeToolDock(docked:boolean):void{
+  const toolbar=byId("sketch-tool-rail");
+  const destination=docked?byId("tool-dock-slot"):byId("sketch-wrap");
+  destination.append(toolbar);
+  byId("workbench-layout").classList.toggle("tools-docked",docked);
+  const toggle=button("tool-dock-toggle");
+  toggle.setAttribute("aria-pressed",String(docked));
+  toggle.textContent=docked?"⇤ Undock":"⇥ Dock";
+  toggle.title=docked?"Float sketch tools in canvas":"Anchor sketch tools in title bar";
+}
+const workspaceLayout=new WorkspaceLayoutController(
+  byId("workbench-layout"),byId("workbench-side"),
+  byId("main-resizer"),byId("side-resizer"),changeToolDock
+);
 let preview:Preview|null=null;
 try{
   const host=byId("preview");host.replaceChildren();preview=new Preview(host);
@@ -429,6 +468,7 @@ function rebuild():void {
       if(n!==generation)return;
       lastStats=result.statistics;
       committedBuild=result;
+      setVolume(result.statistics?.volumeMm3??null);
       preview?.setFaceElevations(snapshot.features.flatMap(f=>[f.z,f.z+f.depth]));
       if(extrudeTargets.length&&input("extrude-preview").checked){
         preview?.setCommittedPickMesh(result.mesh);
@@ -501,6 +541,7 @@ function restoreCommittedPreview():void {
   byId("solid-preview-status").hidden=true;
   if(committedBuild)
     preview?.setMesh(committedBuild.mesh,{preserveCamera:true});
+  setVolume(committedBuild?.statistics?.volumeMm3??null);
   // If a rebuild has not returned, keep displaying the previous valid mesh.
 }
 function closeExtrude():void {
@@ -705,6 +746,7 @@ function scheduleOperationPreview():void {
       if(token!==previewToken||doc!==source||!extrudeTargets.length||!input("extrude-preview").checked)return;
       preview?.setMesh(result.mesh,{pending:mode,preserveCamera:true,
         cutTool:result.cutTool?.mesh});
+      setVolume(result.statistics?.volumeMm3??null,true);
       host.dataset.previewState="ready";
       host.dataset.previewOperation=mode;
       if(result.statistics)host.dataset.previewVolumeMm3=String(result.statistics.volumeMm3);
@@ -1048,6 +1090,7 @@ button("selection-delete").onclick=()=>safe(removeSelected);
 button("selection-duplicate").onclick=()=>safe(duplicateSelected);
 button("selection-properties").onclick=()=>toggleDetails("properties-details");
 button("grid-quick").onclick=showGrid;
+button("tool-dock-toggle").onclick=()=>workspaceLayout.setDocked(!workspaceLayout.docked);
 button("fit-solid").onclick=()=>preview?.fitView();
 byId<HTMLDetailsElement>("history-details").addEventListener("toggle",()=>{
   if(byId<HTMLDetailsElement>("history-details").open)
