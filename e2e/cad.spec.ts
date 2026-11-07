@@ -875,7 +875,7 @@ test("sketch tool rail docks in titlebar, keeps drawing interactions and remembe
   const toolbar=page.locator("#sketch-tool-rail");
   const toggle=page.locator("#tool-dock-toggle");
   await expect(toggle).toHaveAttribute("aria-pressed","false");
-  await expect(toolbar).toHaveJSProperty("parentElement",null).catch(()=>{}); // explicit DOM checks below
+  await expect(page.locator("#sketch-wrap #sketch-tool-rail")).toHaveCount(1);
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-pressed","true");
   await expect(page.locator("#tool-dock-slot #sketch-tool-rail")).toHaveCount(1);
