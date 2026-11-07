@@ -1,0 +1,233 @@
+/* flatCAD adaptive workbench — layout v1
+ * The CSS grid separator lengths are user-adjustable but never serialized
+ * into the CAD project. Splitter pointer logic lives in workspace-layout.ts.
+ */
+.workbench .workbench-layout{
+  display:grid;
+  grid-template-columns:minmax(280px,var(--main-split,56%)) 8px minmax(280px,1fr);
+  grid-template-rows:minmax(0,1fr);
+  min-width:0;min-height:0;
+  gap:0;padding:8px;overflow:hidden;
+}
+.workbench .workbench-sketch{
+  display:flex;flex-direction:column;
+  min-width:0;min-height:0;flex:none;
+  margin-right:3px;
+}
+.workbench .workbench-side{
+  display:grid;
+  grid-template-columns:minmax(0,1fr);
+  grid-template-rows:minmax(155px,var(--solid-split,54%)) 8px minmax(115px,1fr);
+  min-width:0;min-height:0;flex:none;gap:0;
+  padding-left:3px;
+}
+.workbench .preview-panel{
+  min-width:0;min-height:0;flex:none;
+}
+.workbench .preview-panel .preview-root{flex:1;min-height:0}
+.workbench .inspector-drawer{
+  flex:none;max-height:none;min-height:0;
+  overflow:auto;padding-top:4px;gap:5px;
+  scrollbar-width:thin;scrollbar-color:#345774 transparent;
+}
+.panel-resizer{
+  position:relative;display:flex;align-items:center;justify-content:center;
+  background:transparent;touch-action:none;user-select:none;
+  border:0;z-index:8;
+  transition:background .1s ease;
+}
+.panel-resizer:before{
+  content:"";position:absolute;
+  background:#34536f;border-radius:99px;
+  transition:background .1s ease,transform .1s ease;
+}
+.main-resizer{cursor:col-resize}
+.main-resizer:before{width:2px;height:46px}
+.side-resizer{cursor:row-resize}
+.side-resizer:before{height:2px;width:52px}
+.panel-resizer:hover:before,.panel-resizer:focus-visible:before{
+  background:#85bffa;transform:scale(1.35);
+}
+.panel-resizer:focus-visible{
+  outline:1px solid #74add9;
+  outline-offset:-1px;border-radius:3px;
+}
+.panel-resizer:active:before{background:#a8d7ff}
+.workbench .sketch-titlebar{
+  gap:7px;padding:6px 9px;min-width:0;
+  display:flex;justify-content:space-between;
+  flex-wrap:nowrap;
+}
+.sketch-titlebar .header-label{flex:0 0 auto;gap:7px}
+.sketch-titlebar .header-label small{font-size:9px;white-space:nowrap}
+.sketch-titlebar .header-label strong{font-size:12px}
+.sketch-titlebar #sketch-context{
+  font-size:10px;padding:4px 6px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  max-width:110px;flex:0 1 auto;
+}
+.tool-dock-slot{
+  display:flex;align-items:center;justify-content:center;
+  flex:1 1 auto;min-width:0;max-width:100%;
+  overflow-x:auto;scrollbar-width:none;
+}
+.tool-dock-slot:empty{display:none}
+.tool-dock-slot::-webkit-scrollbar{display:none}
+.workbench-layout.tools-docked #sketch-context{display:none}
+.workbench-layout.tools-docked #sketch-tool-rail{
+  position:static;top:auto;left:auto;transform:none;
+  display:flex;flex-direction:row;flex:0 0 auto;
+  gap:1px;padding:1px;border:0;box-shadow:none;
+  background:transparent;z-index:auto;
+}
+.workbench-layout.tools-docked #sketch-tool-rail .rail-tool{
+  width:29px;height:29px;font-size:18px;min-width:29px;
+}
+.workbench-layout.tools-docked #sketch-tool-rail .rail-divider{
+  width:1px;height:21px;margin:4px 2px;background:#456683;
+}
+.sketch-title-actions{
+  display:flex;gap:2px;align-items:center;flex:0 0 auto;
+}
+.sketch-title-actions .text-button{
+  padding:5px 6px;white-space:nowrap;font-size:10px;
+}
+.tool-dock-toggle[aria-pressed="true"]{color:#c2e5ff;background:#254260}
+.titlebar-zoom,.titlebar-profiles{
+  font:10px ui-monospace,Consolas,monospace;
+  color:#91b1ce;white-space:nowrap;
+  padding:0 5px;
+}
+.titlebar-action{
+  display:grid;place-items:center;
+  width:28px;height:29px;font-size:19px;
+  background:transparent;color:#c0d6eb;
+  border:1px solid transparent;border-radius:5px;
+}
+.titlebar-action:hover:not(:disabled){
+  background:#304b6b;color:#f4fbff;
+}
+.titlebar-action:disabled{opacity:.35;cursor:not-allowed}
+.workbench .solid-titlebar{gap:7px;padding:6px 10px}
+.workbench .solid-titlebar .header-label{min-width:72px}
+.solid-volume{
+  color:#e4f2ff;font:600 11px ui-monospace,Consolas,monospace;
+  white-space:nowrap;letter-spacing:-.015em;
+  font-variant-numeric:tabular-nums;
+}
+.solid-volume[data-mode="preview"]{color:#92ead4}
+.solid-view-actions{gap:7px;min-width:0}
+.solid-titlebar .live-dot{display:inline-block;flex:0 0 7px}
+.status-feedback:not(.error){
+  position:absolute!important;width:1px;height:1px;
+  overflow:hidden;clip-path:inset(50%);white-space:nowrap;
+  padding:0;border:0;
+}
+.status-feedback.error{
+  position:absolute;top:52px;left:12px;right:12px;
+  z-index:25;padding:10px 11px;
+  background:#4b2732ef;color:#ffced5;
+  border:1px solid #c56a7a;border-radius:6px;
+  font:11px ui-monospace,monospace;line-height:1.5;
+}
+/* No bottom status/footer or Sketch panel bottom strip: controls now live in
+ * the window title bars and the error status is a contextual overlay. */
+.workbench .statusbar,.workbench .workbench-sketch>.panel-footer{display:none}
+
+/* Dense newest-first feature provenance. The only editable inputs reside
+ * inside the active single-feature panel, never repeated on every tile. */
+.workbench .history-drawer .history-content{
+  overflow:visible;max-height:none;padding:6px;
+}
+.history-tiles{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(112px,1fr));
+  gap:6px;align-items:start;min-width:0;
+}
+.history-tiles .history-tile{
+  display:flex;flex-direction:column;gap:4px;
+  width:100%;min-width:0;
+  border:1px solid #344e6a;border-radius:7px;
+  padding:5px;background:#182b40;
+  cursor:pointer;text-align:left;color:#e8f3ff;
+  margin:0;box-shadow:none;
+}
+.history-tiles .history-tile:hover{
+  border-color:#6ca4d6;background:#263e57;
+}
+.history-tiles .history-tile[data-selected="true"],
+.history-tiles .history-tile:focus-visible{
+  outline:1px solid #e8b676;outline-offset:0;
+  border-color:#e8b676;background:#394358;
+}
+.history-tiles .history-thumbnail{
+  width:100%;max-width:none;height:auto;aspect-ratio:11 / 6;
+  margin:0;border-radius:4px;
+}
+.history-tiles .history-summary{display:block;width:100%;min-width:0}
+.history-tiles .history-feature-name{
+  display:-webkit-box;
+  -webkit-box-orient:vertical;-webkit-line-clamp:2;
+  overflow:hidden;font-size:10.5px;line-height:1.2;
+  min-height:25px;overflow-wrap:anywhere;
+}
+.history-tiles .history-feature-extent{
+  display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  margin-top:3px;color:#91b0cb;font:9px ui-monospace,Consolas,monospace;
+}
+.history-feature-editor{
+  position:sticky;top:0;z-index:5;
+  margin:0 0 6px;padding:9px;
+  background:#233a53f5;border:1px solid #6792b5;
+  border-radius:7px;box-shadow:0 6px 20px #0006;
+}
+.history-editor-heading{
+  display:flex;justify-content:space-between;
+  gap:8px;align-items:center;margin-bottom:9px;
+}
+.history-editor-heading strong{font-size:12px;color:#e8f2fa}
+.history-editor-heading .text-button{padding:4px 7px;font-size:16px}
+.history-feature-editor .field-row{display:flex;flex-wrap:nowrap;align-items:end;gap:6px}
+.history-feature-editor .field{flex:1 1 0;min-width:65px}
+.history-feature-editor select{
+  align-self:end;background:#102439;color:#d9edff;
+  border:1px solid #4b6b8b;border-radius:5px;
+  padding:9px 5px;font-size:11px;min-width:65px;max-width:100px;
+}
+.history-feature-editor .field input{
+  padding:8px 5px;font:11px ui-monospace,monospace;
+}
+.history-editor-actions{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:8px;flex-wrap:wrap;margin-top:9px;
+}
+.history-editor-actions .history-feature-volume{
+  flex:1;min-width:115px;font-size:10px;
+}
+.history-editor-actions .button.danger{margin:0;padding:7px 9px}
+@media(max-width:1100px){
+  .workbench .workbench-layout{
+    grid-template-columns:minmax(0,1fr);
+    grid-template-rows:minmax(230px,var(--main-split,56%)) 8px minmax(230px,1fr);
+    overflow:hidden;
+  }
+  .workbench .workbench-sketch{
+    min-height:0;min-width:0;flex:none;
+  }
+  .workbench .workbench-side{
+    min-height:0;min-width:0;flex:none;
+  }
+  .main-resizer{cursor:row-resize}
+  .main-resizer:before{height:2px;width:52px}
+  .sketch-titlebar .titlebar-zoom{display:none}
+}
+@media(max-width:720px){
+  .workbench .sketch-titlebar{
+    min-height:47px;flex-wrap:wrap;row-gap:4px;
+  }
+  .tool-dock-slot{order:3;flex-basis:100%;justify-content:flex-start}
+  .sketch-title-actions{margin-left:auto}
+  .sketch-titlebar #sketch-context,.titlebar-profiles{display:none}
+  .workbench .solid-titlebar .header-label small{display:none}
+  .solid-view-actions .chip{display:none}
+  .history-tiles{grid-template-columns:repeat(auto-fill,minmax(105px,1fr))}
+}
