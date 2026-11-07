@@ -854,7 +854,7 @@ test("resizing both dividers changes panels without touching CAD data and persis
 });
 
 test("stacked viewport still offers pointer-resizable horizontal Sketch/Solid divider",async({page})=>{
-  await page.setViewportSize({width:900,height:850});
+  await page.setViewportSize({width:760,height:850});
   await page.goto("/");
   const main=page.locator("#main-resizer");
   await expect(main).toHaveAttribute("aria-orientation","horizontal");
@@ -1040,4 +1040,28 @@ test("named formulas in extrusion fields bind signed Z/depth and reject unknown 
   expect(recent.depth).toBe(6);
   expect(data.bindings).toContainEqual({
     target:"feature:"+recent.id+":depth",expression:"rise+2"});
+});
+
+test("landscape layout keeps Sketch and Solid side by side above full-width timeline",async({page})=>{
+  await page.setViewportSize({width:900,height:650});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const sketch=(await page.locator(".workbench-sketch").boundingBox())!;
+  const solid=(await page.locator(".preview-panel").boundingBox())!;
+  const timeline=(await page.locator("#history-timeline").boundingBox())!;
+  expect(solid.x).toBeGreaterThan(sketch.x+sketch.width);
+  expect(timeline.y).toBeGreaterThan(sketch.y+sketch.height-4);
+  expect(timeline.width).toBeGreaterThan(830);
+  expect(timeline.y+timeline.height).toBeLessThanOrEqual(650);
+  await expect(page.locator("#main-resizer")).toHaveAttribute("aria-orientation","vertical");
+  await expect(page.locator("#preview canvas")).toBeVisible();
+  await expect(page.locator("#preview")).toHaveAttribute("data-rendered-solid","true");
+  const original=await page.locator("#preview").getAttribute("data-camera-direction");
+  const resize=page.locator("#main-resizer"),r=(await resize.boundingBox())!;
+  await page.mouse.move(r.x+r.width/2,r.y+r.height/2);
+  await page.mouse.down();
+  await page.mouse.move(r.x+r.width/2+50,r.y+r.height/2,{steps:6});
+  await page.mouse.up();
+  await expect(page.locator("#preview")).toHaveAttribute("data-rendered-solid","true");
+  expect(await page.locator("#preview").getAttribute("data-camera-direction")).toBe(original);
 });

@@ -295,20 +295,21 @@
 }
 @media(orientation:landscape) and (min-width:780px) and (max-width:1100px){
   .workbench .workbench-layout{
-    grid-template-rows:minmax(125px,var(--main-split,54%)) 8px
-      minmax(125px,1fr) 134px
+    grid-template-columns:minmax(0,var(--main-split,56%)) 8px minmax(0,1fr);
+    grid-template-rows:minmax(0,1fr) 134px;
   }
-  .workbench .workbench-sketch{grid-row:1}
-  .workbench .main-resizer{grid-row:2}
-  .workbench .workbench-side{grid-row:3}
-  .workbench .history-timeline{grid-row:4}
+  .workbench .workbench-sketch{grid-column:1;grid-row:1}
+  .workbench .main-resizer{grid-column:2;grid-row:1;cursor:col-resize}
+  .workbench .main-resizer:before{width:2px;height:46px}
+  .workbench .workbench-side{grid-column:3;grid-row:1}
+  .workbench .history-timeline{grid-column:1/-1;grid-row:2}
 }
 @media(min-width:1101px){
   .workbench .workbench-layout.three-tiles{
     grid-template-columns:minmax(0,var(--three-first,40%))
       8px minmax(0,var(--three-second,25%))
       8px minmax(0,1fr);
-    grid-template-rows:minmax(0,1fr) 134px;
+    grid-template-rows:minmax(0,1fr);
   }
   .workbench .workbench-layout.three-tiles .workbench-side{display:contents}
   .workbench .workbench-layout.three-tiles .workbench-sketch{
@@ -346,3 +347,9 @@
   color:#b7efcf;border-color:#458975;
 }
 @media(max-width:720px){.parameter-row{grid-template-columns:1fr 1.4fr 65px 28px;gap:4px}}
+
+@media(orientation:landscape) and (min-width:1101px){
+  .workbench .workbench-layout.three-tiles{
+    grid-template-rows:minmax(0,1fr) 134px;
+  }
+}
