@@ -56,6 +56,7 @@ Geometric constraint solving, standalone arcs, automatic region extraction from 
 
 ## Documents
 
+- [Owner-approved product vision and agent design contract](docs/PRODUCT-VISION.md)
 - [Canvas-first UX and shortcuts](docs/UX-DIRECT-INTERACTION.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Roadmap](docs/ROADMAP.md)
