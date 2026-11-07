@@ -537,3 +537,135 @@ test("Cut preview shows translucent red full tool, overshoot and distinct remove
   await expect(page.locator("#cut-tool-metrics")).toBeHidden();
   await expect(page.locator("#preview")).not.toHaveAttribute("data-cut-tool-visible",/./);
 });
+
+
+test("visual Solid reference grid stays BELOW a plate instead of cutting through it",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const gridZ=Number(await page.locator("#preview").getAttribute("data-grid-z"));
+  const solidMin=Number(await page.locator("#preview").getAttribute("data-display-model-min-z"));
+  expect(solidMin).toBe(0);
+  expect(gridZ).toBeLessThan(solidMin);
+});
+
+test("visual Solid grid follows negative Z solids below their minimum elevation",async({page})=>{
+  await page.goto("/");await newProject(page);
+  await page.keyboard.press("r");await draw(page,[.34,.37],[.58,.61]);
+  await page.keyboard.press("e");
+  await page.locator("#extrude-z").fill("-4");
+  await page.locator("#extrude-depth").fill("-6");
+  await page.locator("#apply-extrude").click();
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const z=Number(await page.locator("#preview").getAttribute("data-grid-z"));
+  expect(Number(await page.locator("#preview").getAttribute("data-display-model-min-z")))
+    .toBe(-10);
+  expect(z).toBeLessThan(-10);
+});
+
+test("the display grid also remains below provisional cutting-tool overshoot",async({page})=>{
+  await page.goto("/");await newProject(page);
+  await page.keyboard.press("r");await draw(page,[.32,.35],[.68,.65]);
+  await page.keyboard.press("e");await page.locator("#apply-extrude").click();
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await page.keyboard.press("c");await draw(page,[.50,.50],[.54,.50]);
+  await page.keyboard.press("e");
+  await expect(page.locator("#preview")).toHaveAttribute("data-preview-state","ready",{timeout:120000});
+  const grid=Number(await page.locator("#preview").getAttribute("data-grid-z"));
+  const displayedBottom=Number(await page.locator("#preview").getAttribute("data-display-bottom-z"));
+  const bodyMin=Number(await page.locator("#preview").getAttribute("data-display-model-min-z"));
+  expect(displayedBottom).toBeLessThan(bodyMin);
+  expect(grid).toBeLessThan(displayedBottom);
+  await page.locator("#cancel-extrude").click();
+  await expect(page.locator("#preview")).not.toHaveAttribute("data-cut-tool-visible",/./);
+});
+
+test("blank sketch background is not draggable under Select, but deliberate middle-pan still works",async({page})=>{
+  await page.goto("/");await newProject(page);
+  await page.keyboard.press("v");
+  const canvas=page.locator("#sketch");
+  const b=(await canvas.boundingBox())!;
+  const x=b.x+b.width*.57,y=b.y+b.height*.55;
+  const beforeX=Number(await canvas.getAttribute("data-view-pan-x"));
+  const beforeY=Number(await canvas.getAttribute("data-view-pan-y"));
+  await page.mouse.move(x,y);
+  await page.mouse.down();
+  await page.mouse.move(x+95,y+49,{steps:6});
+  await page.mouse.up();
+  expect(Number(await canvas.getAttribute("data-view-pan-x"))).toBe(beforeX);
+  expect(Number(await canvas.getAttribute("data-view-pan-y"))).toBe(beforeY);
+  await expect(page.locator("#profile-count")).toHaveText("0 profiles");
+  expect(await canvas.evaluate((element:HTMLCanvasElement)=>element.draggable)).toBe(false);
+  await page.mouse.move(x,y);
+  await page.mouse.down({button:"middle"});
+  await page.mouse.move(x+40,y+30,{steps:4});
+  await page.mouse.up({button:"middle"});
+  expect(Number(await canvas.getAttribute("data-view-pan-x"))).toBeGreaterThan(beforeX);
+});
+
+test("R zero-size release toggles to second-click rubber-band completion",async({page})=>{
+  await page.goto("/");await newProject(page);
+  await page.keyboard.press("r");
+  const canvas=page.locator("#sketch");
+  const b=(await canvas.boundingBox())!;
+  const a={x:b.x+b.width*.34,y:b.y+b.height*.40};
+  const end={x:b.x+b.width*.63,y:b.y+b.height*.64};
+  await page.mouse.click(a.x,a.y);
+  await expect(canvas).toHaveAttribute("data-draw-stage","await-second-click");
+  await expect(canvas).toHaveAttribute("data-draw-tool","rectangle");
+  await expect(page.locator("#profile-count")).toHaveText("0 profiles");
+  await page.mouse.move(end.x,end.y,{steps:6});
+  await page.mouse.click(end.x,end.y);
+  await expect(canvas).not.toHaveAttribute("data-draw-stage",/./);
+  await expect(page.locator("#profile-count")).toHaveText("1 profiles");
+  const saved=await saveProject(page);
+  expect(saved.profiles[0].kind).toBe("rectangle");
+  expect(saved.profiles[0].width).toBeGreaterThan(0);
+  expect(saved.profiles[0].height).toBeGreaterThan(0);
+});
+
+test("Shift+R centre rectangle supports a click-click square with stable origin",async({page})=>{
+  await page.goto("/");await newProject(page);
+  await page.keyboard.press("Shift+r");
+  const canvas=page.locator("#sketch"),b=(await canvas.boundingBox())!;
+  const a={x:b.x+b.width*.47,y:b.y+b.height*.46};
+  const end={x:a.x+90,y:a.y+50};
+  await page.mouse.click(a.x,a.y);
+  await expect(canvas).toHaveAttribute("data-draw-stage","await-second-click");
+  await page.keyboard.down("Shift");
+  await page.mouse.click(end.x,end.y);
+  await page.keyboard.up("Shift");
+  const doc=await saveProject(page),p=doc.profiles[0];
+  expect(p.kind).toBe("rectangle");
+  expect(p.width).toBe(p.height);
+  expect(p.width).toBeGreaterThan(0);
+});
+
+for(const [shortcut,kind] of [["c","circle"],["p","polygon"],["s","slot"]] as const){
+  test(shortcut+" click-click creates a nonzero "+kind+" using its secondary datum",async({page})=>{
+    await page.goto("/");await newProject(page);
+    await page.keyboard.press(shortcut);
+    const canvas=page.locator("#sketch"),b=(await canvas.boundingBox())!;
+    const x=b.x+b.width*.45,y=b.y+b.height*.48;
+    await page.mouse.click(x,y);
+    await expect(canvas).toHaveAttribute("data-draw-stage","await-second-click");
+    await page.mouse.move(x+80,y+40);
+    await page.mouse.click(x+80,y+40);
+    await expect(page.locator("#profile-count")).toHaveText("1 profiles");
+    const doc=await saveProject(page);
+    expect(doc.profiles[0].kind).toBe(kind);
+    if(kind==="circle"||kind==="polygon")expect(doc.profiles[0].radius).toBeGreaterThan(0);
+    else expect(doc.profiles[0].x2).not.toBe(doc.profiles[0].x1);
+  });
+}
+
+test("Escape cancels pending two-click drawing without moving or committing background",async({page})=>{
+  await page.goto("/");await newProject(page);
+  await page.keyboard.press("r");
+  const canvas=page.locator("#sketch"),b=(await canvas.boundingBox())!;
+  await page.mouse.click(b.x+b.width*.45,b.y+b.height*.43);
+  await expect(canvas).toHaveAttribute("data-draw-stage","await-second-click");
+  await page.keyboard.press("Escape");
+  await expect(canvas).not.toHaveAttribute("data-draw-stage",/./);
+  await page.mouse.click(b.x+b.width*.64,b.y+b.height*.61);
+  await expect(page.locator("#profile-count")).toHaveText("0 profiles");
+});

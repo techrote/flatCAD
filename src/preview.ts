@@ -3,6 +3,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import type { GeometryMesh } from "./kernel-protocol";
 import { dragAction, orbitControlsBinding, type NavigationPreset } from "./navigation";
 import { exactFaceElevation } from "./signed-extrusion";
+import { presentationGridZ } from "./display-grid";
 import type { SurfaceTarget } from "./surface-interaction";
 
 /** OpenCascade B-rep-derived display; face picking references COMMITTED geometry only. */
@@ -12,6 +13,7 @@ export class Preview {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly orbit: OrbitControls;
   private readonly resizeObserver: ResizeObserver;
+  private readonly referenceGrid: THREE.GridHelper;
   private readonly raycaster = new THREE.Raycaster();
   private readonly pickPoint = new THREE.Vector2();
   private object: THREE.Group | null = null;
@@ -113,7 +115,13 @@ export class Preview {
     fill.position.set(-80, 70, 50);
     this.scene.add(fill);
     const grid = new THREE.GridHelper(300, 30, 0x34567a, 0x1c3046);
+    // This is only a visual reference floor, NOT the authoritative XY
+    // sketch plane. It must remain below even downward-extruded solids.
     grid.rotation.x = Math.PI / 2;
+    grid.material.depthTest = true;
+    grid.material.depthWrite = false;
+    grid.renderOrder = -100;
+    this.referenceGrid=grid;
     this.scene.add(grid);
     this.scene.add(new THREE.AxesHelper(35));
     this.resizeObserver = new ResizeObserver(() => this.resize());
@@ -317,7 +325,12 @@ export class Preview {
       });
       this.object = null;
     }
-    if (!mesh || mesh.triangles.length === 0) return;
+    if (!mesh || mesh.triangles.length === 0) {
+      this.referenceGrid.position.z=0;
+      this.container.dataset.gridZ="0";
+      delete this.container.dataset.displayModelMinZ;
+      return;
+    }
     const group = new THREE.Group();
     group.add(new THREE.Mesh(this.makeGeometry(mesh), new THREE.MeshStandardMaterial({
       color: options.pending === "add" ? 0x73d1b8 : options.pending === "cut" ? 0xf2af7d : 0x6aacf4,
@@ -341,6 +354,18 @@ export class Preview {
     this.scene.add(group);
     this.object = group;
     const bounds = new THREE.Box3().setFromObject(group);
+    const modelBounds = new THREE.Box3().setFromObject(group.children[0]);
+    if(!bounds.isEmpty()&&!modelBounds.isEmpty()){
+      // Include a provisional cutting tool's overshoot in the floor's Z
+      // extent. Moving the visual grid never changes model coordinates.
+      const gridZ=presentationGridZ(modelBounds.min.z,
+        modelBounds.max.z-modelBounds.min.z,bounds.min.z);
+      this.referenceGrid.position.z=gridZ;
+      this.referenceGrid.updateMatrixWorld();
+      this.container.dataset.gridZ=String(gridZ);
+      this.container.dataset.displayModelMinZ=String(modelBounds.min.z);
+      this.container.dataset.displayBottomZ=String(bounds.min.z);
+    }
     if (!options.preserveCamera && !bounds.isEmpty()) {
       const center = bounds.getCenter(new THREE.Vector3());
       const radius = bounds.getSize(new THREE.Vector3()).length();
