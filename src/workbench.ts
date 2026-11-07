@@ -48,7 +48,7 @@ root.innerHTML=[
   '    <section class="panel sketch-section workbench-sketch">',
   '      <div class="panel-head compact-head sketch-titlebar"><div class="header-label"><span class="panel-index">01</span><div><strong>Sketch</strong><small>XY · millimetres</small></div></div>',
   '        <div id="tool-dock-cluster" class="tool-dock-cluster">',
-  '          <button id="tool-dock-toggle" class="rail-tool dock-anchor" aria-label="Dock sketch tools" aria-pressed="false" title="Click to dock/undock; drag along titlebar to move">⚓</button>',
+  '          <button id="tool-dock-toggle" class="rail-tool dock-anchor" aria-label="Dock sketch tools" aria-pressed="false" title="Click to dock/undock; drag along titlebar to move"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="2"/><path d="M12 7v14M4 13H2a10 10 0 0 0 20 0h-2M5 13l2-2m12 2-2-2"/></svg></button>',
   '          <div id="tool-dock-slot" class="tool-dock-slot" aria-label="Docked sketch tools"></div>',
   '        </div>',
   '        <span id="sketch-context" class="chip">Select</span>',
@@ -62,7 +62,7 @@ root.innerHTML=[
   '      <div id="sketch-wrap" class="sketch-wrap">',
   '        <canvas id="sketch" aria-label="2D CAD sketch canvas">Canvas 2D is required</canvas>',
   '        <div id="sketch-tool-rail" class="tool-rail" role="toolbar" aria-label="Sketching tools">',
-  '          <button id="tool-dock-float" class="rail-tool dock-anchor" title="Anchor tools in titlebar" aria-label="Anchor tools in titlebar">⚓</button>',
+  '          <button id="tool-dock-float" class="rail-tool dock-anchor" title="Anchor tools in titlebar" aria-label="Anchor tools in titlebar"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="2"/><path d="M12 7v14M4 13H2a10 10 0 0 0 20 0h-2M5 13l2-2m12 2-2-2"/></svg></button>',
   '          <button data-tool="select" title="Select (V)" class="rail-tool active" aria-label="Select">↖</button>',
   '          <button data-tool="line" title="Line or polyline (L)" class="rail-tool" aria-label="Line">╱</button>',
   '          <button data-tool="rectangle" title="Corner rectangle (R)" class="rail-tool" aria-label="Rectangle">▭</button>',
@@ -328,6 +328,9 @@ dockAnchor.addEventListener("pointerdown",event=>{
   const stop=(e:PointerEvent)=>{
     if(e.pointerId!==event.pointerId)return;
     wasDockDrag=dragged;
+    // Browsers may omit click after a drag. Do not suppress an unrelated
+    // later click in that case; a genuine post-pointerup click runs first.
+    requestAnimationFrame(()=>{wasDockDrag=false;});
     dockAnchor.removeEventListener("pointermove",move);
     dockAnchor.removeEventListener("pointerup",stop);
     dockAnchor.removeEventListener("pointercancel",stop);

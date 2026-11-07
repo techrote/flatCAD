@@ -103,7 +103,13 @@ export class WorkspaceLayoutController{
     this.apply();
     this.onLayoutChange();
   }
-  private isStacked():boolean{return window.matchMedia("(max-width:1100px)").matches;}
+  /** Landscape workbenches favour side-by-side authoring and dedicate the
+   *  full lower edge to history; narrow portrait stays vertically stacked. */
+  private isStacked():boolean{
+    return window.matchMedia(
+      "(max-width:779px), (max-width:1100px) and (orientation:portrait)"
+    ).matches;
+  }
   private isThree():boolean{return this.state.tileMode==="columns"&&!this.isStacked();}
   private axes(which:"main"|"solid"):{element:HTMLElement,axis:LayoutAxis,divider:HTMLElement}{
     if(this.isThree())return {element:this.outer,axis:"horizontal",
