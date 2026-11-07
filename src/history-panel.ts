@@ -11,6 +11,7 @@ export class FeatureHistoryPanel {
   private lastDocument:CadDocument|null=null;
   private lastFrames:KernelHistoryFrame[]|null=null;
   private currentDocument:CadDocument|null=null;
+  private lastTimeline=false;
   private activeFeatureId:string|null=null;
   private readonly buttons=new Map<string,HTMLButtonElement>();
   private editor:HTMLElement|null=null;
@@ -37,7 +38,10 @@ export class FeatureHistoryPanel {
   }
 
   render(doc:CadDocument,frames:KernelHistoryFrame[]|null):void{
-    if(this.lastDocument===doc&&this.lastFrames===frames)return;
+    const timeline=Boolean(this.host.closest("#history-timeline"));
+    if(this.lastDocument===doc&&this.lastFrames===frames&&
+      this.lastTimeline===timeline)return;
+    this.lastTimeline=timeline;
     this.lastDocument=doc;
     this.lastFrames=frames;
     this.currentDocument=doc;
@@ -62,10 +66,12 @@ export class FeatureHistoryPanel {
     this.host.append(editor);
     const grid=document.createElement("div");
     grid.className="history-tiles";
-    grid.setAttribute("aria-label","Feature history, newest first");
-    // The B-rep was evaluated from oldest to newest; display order does not
-    // mutate doc.features or the stable feature IDs.
-    for(const feature of [...doc.features].reverse()){
+    grid.setAttribute("aria-label",timeline?
+      "Feature timeline, oldest first":"Feature history, newest first");
+    // Horizontal timelines run oldest → newest towards the "Now" endpoint.
+    // The compact portrait history drawer retains newest-first. Neither view
+    // mutates the authoritative document's oldest-first evaluation sequence.
+    for(const feature of (timeline?doc.features:[...doc.features].reverse())){
       const name=featureLabel(doc,feature);
       const card=document.createElement("button");
       card.type="button";

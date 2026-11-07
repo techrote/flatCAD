@@ -1435,7 +1435,10 @@ function isLandscapeHistory():boolean{
 function placeHistoryTimeline():void{
   const target=byId(isLandscapeHistory()?"timeline-content":"history-inline-host");
   const list=byId("feature-list");
-  if(list.parentElement!==target)target.append(list);
+  if(list.parentElement!==target){
+    target.append(list);
+    renderHistory(); // DOM position determines chronological vs newest-first UI.
+  }
   if(isLandscapeHistory()&&byId("preview").dataset.buildState==="ready")
     ensureHistoryThumbnails();
 }

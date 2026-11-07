@@ -719,14 +719,14 @@ test("Feature history has operation/sketch names and actual per-feature B-rep th
   await expect(history.locator('.history-feature-card[data-thumbnail-state="ready"]'))
     .toHaveCount(3,{timeout:120000});
   const names=await history.locator(".history-feature-name").allTextContents();
-  expect(names).toEqual(["Cut · Circle 2","Cut · Circle 1","Extrude · Rectangle 1"]);
+  expect(names).toEqual(["Extrude · Rectangle 1","Cut · Circle 1","Cut · Circle 2"]);
   const thumbs=history.locator("canvas.history-thumbnail");
   await expect(thumbs).toHaveCount(3);
-  await expect(thumbs.nth(0)).toHaveAttribute("data-cut-overlay","true");
+  await expect(thumbs.nth(0)).toHaveAttribute("data-cut-overlay","false");
   await expect(thumbs.nth(1)).toHaveAttribute("data-cut-overlay","true");
-  await expect(thumbs.nth(2)).toHaveAttribute("data-cut-overlay","false");
-  const result=Number(await thumbs.nth(0).getAttribute("data-result-volume-mm3"));
-  const tool=Number(await thumbs.nth(0).getAttribute("data-tool-volume-mm3"));
+  await expect(thumbs.nth(2)).toHaveAttribute("data-cut-overlay","true");
+  const result=Number(await thumbs.nth(2).getAttribute("data-result-volume-mm3"));
+  const tool=Number(await thumbs.nth(2).getAttribute("data-tool-volume-mm3"));
   expect(result).toBeGreaterThan(0);
   expect(tool).toBeGreaterThan(0);
   const pixels=await thumbs.nth(1).evaluate((canvas:HTMLCanvasElement)=>{
@@ -896,7 +896,7 @@ test("sketch tool rail docks in titlebar, keeps drawing interactions and remembe
     .toBe(false);
 });
 
-test("feature history uses newest-first compact tiles; only selected tile shows controls",async({page})=>{
+test("landscape timeline runs oldest first; only selected tile shows controls",async({page})=>{
   await page.goto("/");
   await expect(page.locator("#status")).toContainText("Exact solid generated");
   const history=page.locator("#history-timeline");
@@ -906,7 +906,7 @@ test("feature history uses newest-first compact tiles; only selected tile shows 
   await expect(history.locator(".history-tile[data-thumbnail-state='ready']"))
     .toHaveCount(3,{timeout:120000});
   const names=await tiles.locator(".history-feature-name").allTextContents();
-  expect(names).toEqual(["Cut · Circle 2","Cut · Circle 1","Extrude · Rectangle 1"]);
+  expect(names).toEqual(["Extrude · Rectangle 1","Cut · Circle 1","Cut · Circle 2"]);
   await expect(history.locator("#history-feature-editor")).toBeHidden();
   await expect(history.locator(".history-tiles input")).toHaveCount(0);
   await expect(history.locator(".history-tiles select")).toHaveCount(0);
@@ -934,7 +934,7 @@ test("landscape timeline inspects an exact historical solid without altering the
   await expect(timeline.locator('[data-thumbnail-state="ready"]'))
     .toHaveCount(3,{timeout:120000});
   const original=Number(await page.locator("#solid-volume").getAttribute("data-volume-mm3"));
-  await tiles.nth(2).click();
+  await tiles.first().click();
   await expect(page.locator("#preview")).toHaveAttribute("data-history-feature-count","1");
   const initialVolume=Number(await page.locator("#solid-volume").getAttribute("data-volume-mm3"));
   expect(initialVolume).toBeCloseTo(48000,4);
@@ -1001,4 +1001,24 @@ test("landscape layout keeps Sketch and Solid side by side above full-width time
   await page.mouse.up();
   await expect(page.locator("#preview")).toHaveAttribute("data-rendered-solid","true");
   expect(await page.locator("#preview").getAttribute("data-camera-direction")).toBe(original);
+});
+
+test("portrait history retains newest-first even after switching out of timeline mode",async({page})=>{
+  await page.setViewportSize({width:760,height:850});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const portrait=page.locator("#history-details");
+  await portrait.locator("summary").click();
+  await expect(portrait.locator(".history-tile")).toHaveCount(3);
+  expect(await portrait.locator(".history-feature-name").allTextContents())
+    .toEqual(["Cut · Circle 2","Cut · Circle 1","Extrude · Rectangle 1"]);
+  await page.setViewportSize({width:1280,height:720});
+  const timeline=page.locator("#history-timeline");
+  await expect(timeline).toBeVisible();
+  expect(await timeline.locator(".history-feature-name").allTextContents())
+    .toEqual(["Extrude · Rectangle 1","Cut · Circle 1","Cut · Circle 2"]);
+  await page.setViewportSize({width:760,height:850});
+  await expect(portrait).toBeVisible();
+  expect(await portrait.locator(".history-feature-name").allTextContents())
+    .toEqual(["Cut · Circle 2","Cut · Circle 1","Extrude · Rectangle 1"]);
 });
