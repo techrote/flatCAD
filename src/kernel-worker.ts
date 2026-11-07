@@ -6,7 +6,8 @@ import { setOC, sketchRectangle, sketchCircle, measureVolume, type Shape3D } fro
 import { polygonPoints } from "./geometry";
 import { signedInterval } from "./signed-extrusion";
 import { validateDocument, type Feature, type Profile } from "./model";
-import type { KernelRequest, KernelResponse, GeometryMesh, KernelStatistics, PreviewTool } from "./kernel-protocol";
+import type { KernelRequest, KernelResponse, GeometryMesh, KernelStatistics,
+  PreviewTool, KernelHistoryFrame } from "./kernel-protocol";
 
 const worker = self as DedicatedWorkerGlobalScope;
 let initializePromise: Promise<void> | null = null;
@@ -67,28 +68,39 @@ function makeTool(profile: Profile, feature: Feature): Shape3D {
 }
 
 /** Evaluate features from source parameters, never from the display triangle mesh. */
-function makeSolid(document: ReturnType<typeof validateDocument>): Shape3D | null {
-  const profiles = new Map(document.profiles.map(p => [p.id, p]));
-  let result: Shape3D | null = null;
-  try {
-    for (const feature of document.features) {
-      const profile = profiles.get(feature.profileId);
-      if (!profile) throw new Error("Missing profile: " + feature.profileId);
-      const tool = makeTool(profile, feature);
-      if (!result) {
-        result = tool;
-        continue;
+/** One exact replay, optionally retaining B-rep-derived states after each feature. */
+function makeSolid(
+  document: ReturnType<typeof validateDocument>,
+  frames?:KernelHistoryFrame[]
+): Shape3D | null {
+  const profiles=new Map(document.profiles.map(p=>[p.id,p]));
+  let result:Shape3D|null=null;
+  try{
+    for(const feature of document.features){
+      const profile=profiles.get(feature.profileId);
+      if(!profile)throw new Error("Missing profile: "+feature.profileId);
+      const tool=makeTool(profile,feature);
+      let cutSnapshot:PreviewTool|null=null;
+      if(frames&&feature.operation==="cut"){
+        cutSnapshot=measureAndMesh(tool);
       }
-      try {
-        const next: Shape3D = feature.operation === "add" ? result.fuse(tool) : result.cut(tool);
-        result.delete();
-        result = next;
-      } finally {
-        tool.delete();
+      if(!result){
+        result=tool;
+      }else{
+        try{
+          const next:Shape3D=feature.operation==="add"?result.fuse(tool):result.cut(tool);
+          result.delete();
+          result=next;
+        }finally{tool.delete();}
+      }
+      if(frames&&result){
+        const snapshot=measureAndMesh(result);
+        frames.push({featureId:feature.id,operation:feature.operation,
+          mesh:snapshot.mesh,statistics:snapshot.statistics,cutTool:cutSnapshot});
       }
     }
     return result;
-  } catch (error) {
+  }catch(error){
     result?.delete();
     throw error;
   }
@@ -101,11 +113,32 @@ function measureAndMesh(solid:Shape3D):{mesh:GeometryMesh,statistics:KernelStati
   bbox.delete();
   if(!Number.isFinite(volumeMm3)||volumeMm3<=0)
     throw new Error("B-rep solid has invalid or zero volume");
+  // Only actual B-rep edge endpoints qualify as interactive vertices.
+  // The triangulation's interior corners must not masquerade as CAD vertices.
+  const topologyVertices:number[]=[];
+  const seen=new Set<string>();
+  const edges=solid.edges;
+  try{
+    for(const edge of edges){
+      const ends=[edge.startPoint,edge.endPoint];
+      for(const point of ends){
+        try{
+          const x=point.x,y=point.y,z=point.z;
+          const key=[x,y,z].map(v=>Math.round(v*1e6)).join("/");
+          if(!seen.has(key)){
+            seen.add(key);topologyVertices.push(x,y,z);
+          }
+        }finally{point.delete();}
+      }
+    }
+  }finally{
+    for(const edge of edges)edge.delete();
+  }
   const faces=solid.mesh({tolerance:.08,angularTolerance:.2});
   const edges=solid.meshEdges({tolerance:.08,angularTolerance:.2});
   return {statistics:{volumeMm3,boundsMm},mesh:{
     vertices:faces.vertices,triangles:faces.triangles,
-    normals:faces.normals,edgeLines:edges.lines
+    normals:faces.normals,edgeLines:edges.lines,topologyVertices
   }};
 }
 
@@ -130,11 +163,13 @@ async function handle(request: KernelRequest): Promise<void> {
     const document = validateDocument(request.document);
     if (!document.features.length) {
       if (request.action === "step") throw new Error("Add an extrusion before exporting STEP");
-      worker.postMessage({ id: request.id, ok: true, action: "build", mesh: null, statistics: null, cutTool: null } satisfies KernelResponse);
+      worker.postMessage({ id: request.id, ok: true, action: "build", mesh: null, statistics: null, cutTool: null,
+        historyFrames:[] } satisfies KernelResponse);
       return;
     }
     await initialize();
-    const solid = makeSolid(document);
+    const historyFrames:KernelHistoryFrame[]=[];
+    const solid = makeSolid(document,request.includeHistory?historyFrames:undefined);
     if (!solid) throw new Error("No solid created");
     try {
       if (request.action === "step") {
@@ -142,10 +177,13 @@ async function handle(request: KernelRequest): Promise<void> {
         worker.postMessage({ id: request.id, ok: true, action: "step", blob } satisfies KernelResponse);
         return;
       }
-      const {mesh,statistics}=measureAndMesh(solid);
+      const snapshot=historyFrames.at(-1);
+      const {mesh,statistics}=snapshot
+        ? {mesh:snapshot.mesh,statistics:snapshot.statistics}
+        : measureAndMesh(solid);
       const cutTool=makeCutTool(document,request.cutToolFeatureIds??[]);
       worker.postMessage({
-        id:request.id,ok:true,action:"build",mesh,statistics,cutTool
+        id:request.id,ok:true,action:"build",mesh,statistics,cutTool,historyFrames
       } satisfies KernelResponse);
     } finally {
       solid.delete();

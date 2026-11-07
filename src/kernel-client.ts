@@ -14,7 +14,8 @@ export class KernelClient {
       if (!entry) return;
       this.pending.delete(data.id);
       if (!data.ok) entry.reject(new Error(data.message));
-      else entry.resolve(data.action === "build" ? { mesh: data.mesh, statistics: data.statistics, cutTool: data.cutTool } : data.blob);
+      else entry.resolve(data.action === "build" ? { mesh: data.mesh, statistics: data.statistics,
+          cutTool: data.cutTool, historyFrames: data.historyFrames } : data.blob);
     };
     this.worker.onerror = event => {
       const error = new Error(event.message || "CAD worker failed");
@@ -23,17 +24,20 @@ export class KernelClient {
     };
   }
 
-  private request<T>(action: KernelAction, document: CadDocument,cutToolFeatureIds?:string[]): Promise<T> {
+  private request<T>(action: KernelAction, document: CadDocument,
+    options:{cutToolFeatureIds?:string[],includeHistory?:boolean}={}): Promise<T> {
     const id = this.nextId++;
     return new Promise<T>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      const message: KernelRequest = { id, action, document, cutToolFeatureIds };
+      const message: KernelRequest = { id, action, document,
+        cutToolFeatureIds:options.cutToolFeatureIds,includeHistory:options.includeHistory };
       this.worker.postMessage(message);
     });
   }
 
-  build(document: CadDocument,options:{cutToolFeatureIds?:string[]}={}): Promise<KernelBuild> {
-    return this.request("build", document,options.cutToolFeatureIds);
+  build(document: CadDocument,
+    options:{cutToolFeatureIds?:string[],includeHistory?:boolean}={}): Promise<KernelBuild> {
+    return this.request("build", document,options);
   }
 
   exportSTEP(document: CadDocument): Promise<Blob> {
