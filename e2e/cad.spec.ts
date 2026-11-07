@@ -719,14 +719,14 @@ test("Feature history has operation/sketch names and actual per-feature B-rep th
   await expect(history.locator('.history-feature-card[data-thumbnail-state="ready"]'))
     .toHaveCount(3,{timeout:120000});
   const names=await history.locator(".history-feature-name").allTextContents();
-  expect(names).toEqual(["Extrude · Rectangle 1","Cut · Circle 1","Cut · Circle 2"]);
+  expect(names).toEqual(["Cut · Circle 2","Cut · Circle 1","Extrude · Rectangle 1"]);
   const thumbs=history.locator("canvas.history-thumbnail");
   await expect(thumbs).toHaveCount(3);
-  await expect(thumbs.nth(0)).toHaveAttribute("data-cut-overlay","false");
+  await expect(thumbs.nth(0)).toHaveAttribute("data-cut-overlay","true");
   await expect(thumbs.nth(1)).toHaveAttribute("data-cut-overlay","true");
-  await expect(thumbs.nth(2)).toHaveAttribute("data-cut-overlay","true");
-  const result=Number(await thumbs.nth(2).getAttribute("data-result-volume-mm3"));
-  const tool=Number(await thumbs.nth(2).getAttribute("data-tool-volume-mm3"));
+  await expect(thumbs.nth(2)).toHaveAttribute("data-cut-overlay","false");
+  const result=Number(await thumbs.nth(0).getAttribute("data-result-volume-mm3"));
+  const tool=Number(await thumbs.nth(0).getAttribute("data-tool-volume-mm3"));
   expect(result).toBeGreaterThan(0);
   expect(tool).toBeGreaterThan(0);
   const pixels=await thumbs.nth(1).evaluate((canvas:HTMLCanvasElement)=>{
