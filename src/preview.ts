@@ -45,6 +45,7 @@ export class Preview {
     this.orbit = new OrbitControls(this.camera, this.renderer.domElement);
     this.orbit.enableDamping = true;
     this.orbit.target.set(0, 0, 0);
+    this.orbit.addEventListener("change",()=>this.recordCameraState());
     this.setNavigationPreset("fusion");
 
     // Capture is necessary: OrbitControls reads the selected mouse action on
@@ -379,6 +380,7 @@ export class Preview {
       this.referenceGrid.position.z=0;
       this.container.dataset.gridZ="0";
       this.container.dataset.renderedSolid="false";
+      this.hasFramedSolid=false;
       delete this.container.dataset.cutToolVisible;
       delete this.container.dataset.displayModelMinZ;
       delete this.container.dataset.displayBottomZ;
@@ -432,8 +434,7 @@ export class Preview {
         this.frameBounds(bounds);
         this.hasFramedSolid=true;
       }
-      this.container.dataset.cameraDirection=
-        this.camera.position.clone().sub(this.orbit.target).normalize().toArray().join(",");
+      this.recordCameraState();
     }catch(error){
       // An incomplete candidate never leaves the viewport blank.
       if(this.object===group){this.object=null;this.scene.remove(group);}
@@ -453,6 +454,12 @@ export class Preview {
           material.dispose();
       }
     });
+  }
+  private recordCameraState():void{
+    this.container.dataset.cameraDirection=
+      this.camera.position.clone().sub(this.orbit.target).normalize().toArray().join(",");
+    this.container.dataset.cameraTarget=this.orbit.target.toArray().join(",");
+    this.container.dataset.cameraZoom=String(this.camera.zoom);
   }
   private frameBounds(bounds:THREE.Box3):void{
     if(bounds.isEmpty())return;
