@@ -990,6 +990,7 @@ test("named-parameter chains bind exact sketch dimensions and persist in native 
   await page.getByLabel("Parameter expression plateWidth").fill("120");
   await page.getByLabel("Parameter expression plateWidth").press("Tab");
   await page.locator('[data-param-close]').last().click();
+  await page.locator("#profiles-details summary").click();
   await page.locator("#profile-list .profile-item").first().click();
   await page.locator("#properties-details summary").click();
   const width=page.locator('[data-binding-target="profile:plate:width"]');
@@ -998,6 +999,7 @@ test("named-parameter chains bind exact sketch dimensions and persist in native 
   await width.press("Tab");
   await expect(width).toHaveValue("plateWidth");
   await expect(width).toHaveAttribute("data-expression","true");
+  await page.locator("#properties-details summary").click(); // Blur numeric field before Ctrl+S.
   const saved=await saveProject(page);
   expect(saved.parameters).toEqual([{name:"plateWidth",expression:"120"}]);
   expect(saved.bindings).toContainEqual({target:"profile:plate:width",expression:"plateWidth"});
@@ -1007,6 +1009,8 @@ test("named-parameter chains bind exact sketch dimensions and persist in native 
   await page.getByLabel("Parameter expression plateWidth").press("Tab");
   await page.locator('[data-param-close]').last().click();
   await expect(page.locator("#status")).toContainText("Exact solid generated",{timeout:120000});
+  const newVolume=Number(await page.locator("#status").getAttribute("data-volume-mm3"));
+  expect(newVolume).toBeCloseTo((140*60-2*Math.PI*25)*8,3);
   const updated=await saveProject(page);
   expect(updated.profiles[0].width).toBe(140);
   expect(updated.features).toHaveLength(3);
@@ -1025,6 +1029,7 @@ test("named formulas in extrusion fields bind signed Z/depth and reject unknown 
   await page.getByLabel("Parameter expression rise").fill("8/2");
   await page.getByLabel("Parameter expression rise").press("Tab");
   await page.locator('[data-param-close]').last().click();
+  await page.locator("#profiles-details summary").click();
   await page.locator("#profile-list .profile-item").first().click();
   await page.keyboard.press("e");
   await expect(page.locator("#extrude-flyout")).toBeVisible();
