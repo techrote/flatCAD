@@ -1,5 +1,8 @@
 import { defineConfig } from "@playwright/test";
 
+// Optional cross-browser acceptance; ordinary CI remains pinned to Chromium.
+const browserName=process.env.FLATCAD_E2E_BROWSER==="firefox"?"firefox":"chromium";
+
 export default defineConfig({
   testDir: "e2e",
   timeout: 150_000,
@@ -9,9 +12,11 @@ export default defineConfig({
   reporter: [["line"]],
   use: {
     baseURL: "http://127.0.0.1:4173",
-    browserName: "chromium",
+    browserName,
     headless: true,
-    launchOptions: { args: ["--enable-unsafe-swiftshader", "--use-angle=swiftshader"] },
+    launchOptions: browserName==="chromium"
+      ? { args: ["--enable-unsafe-swiftshader", "--use-angle=swiftshader"] }
+      : {},
     trace: "retain-on-failure",
     screenshot: "only-on-failure"
   },
