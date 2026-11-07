@@ -117,9 +117,9 @@ function measureAndMesh(solid:Shape3D):{mesh:GeometryMesh,statistics:KernelStati
   // The triangulation's interior corners must not masquerade as CAD vertices.
   const topologyVertices:number[]=[];
   const seen=new Set<string>();
-  const edges=solid.edges;
+  const topologyEdges=solid.edges;
   try{
-    for(const edge of edges){
+    for(const edge of topologyEdges){
       const ends=[edge.startPoint,edge.endPoint];
       for(const point of ends){
         try{
@@ -132,7 +132,7 @@ function measureAndMesh(solid:Shape3D):{mesh:GeometryMesh,statistics:KernelStati
       }
     }
   }finally{
-    for(const edge of edges)edge.delete();
+    for(const edge of topologyEdges)edge.delete();
   }
   const faces=solid.mesh({tolerance:.08,angularTolerance:.2});
   const edges=solid.meshEdges({tolerance:.08,angularTolerance:.2});
