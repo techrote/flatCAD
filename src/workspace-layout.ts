@@ -7,12 +7,13 @@ export type TileMode="split"|"columns"|"float";
 export type LayoutState={
   version:1;main:number;solid:number;docked:boolean;
   tileMode:TileMode;tileOrder:[TileId,TileId,TileId];dockX:number;
-  floatX:number;floatY:number;
+  floatX:number;floatY:number;tiledSolidVisible:boolean;
 };
 export const LAYOUT_KEY="flatcad.layout.v1";
 export const DEFAULT_LAYOUT:LayoutState={
   version:1,main:.56,solid:.54,docked:false,tileMode:"split",
-  tileOrder:["sketch","properties","solid"],dockX:.5,floatX:.58,floatY:.17
+  tileOrder:["sketch","properties","solid"],dockX:.5,floatX:.58,floatY:.17,
+  tiledSolidVisible:true
 };
 const TILE_IDS:TileId[]=["sketch","solid","properties"];
 const finite=(n:unknown):n is number=>typeof n==="number"&&Number.isFinite(n);
@@ -41,12 +42,14 @@ export function validateLayout(input:unknown):LayoutState{
   const dockX=value.dockX===undefined?DEFAULT_LAYOUT.dockX:value.dockX;
   const floatX=value.floatX===undefined?DEFAULT_LAYOUT.floatX:value.floatX;
   const floatY=value.floatY===undefined?DEFAULT_LAYOUT.floatY:value.floatY;
+  const tiledSolidVisible=value.tiledSolidVisible===undefined?true:value.tiledSolidVisible;
   if((tileMode!=="split"&&tileMode!=="columns"&&tileMode!=="float")||!validTileOrder(tileOrder)||
     !finite(dockX)||dockX<0||dockX>1||
-    !finite(floatX)||floatX<0||floatX>1||!finite(floatY)||floatY<0||floatY>1)
+    !finite(floatX)||floatX<0||floatX>1||!finite(floatY)||floatY<0||floatY>1||
+    typeof tiledSolidVisible!=="boolean")
     throw new Error("Invalid workspace panel arrangement");
   return {version:1,main:value.main,solid:value.solid,
-    docked:value.docked,tileMode,tileOrder:[...tileOrder],dockX,floatX,floatY};
+    docked:value.docked,tileMode,tileOrder:[...tileOrder],dockX,floatX,floatY,tiledSolidVisible};
 }
 export function loadLayout():LayoutState{
   try{
@@ -78,6 +81,11 @@ export class WorkspaceLayoutController{
   get docked():boolean{return this.state.docked;}
   get dockX():number{return this.state.dockX;}
   get tileMode():TileMode{return this.state.tileMode;}
+  get tiledSolidVisible():boolean{return this.state.tiledSolidVisible;}
+  setTiledSolidVisible(visible:boolean):void{
+    if(visible!==this.state.tiledSolidVisible)
+      this.commit({...this.state,tiledSolidVisible:visible});
+  }
   get floatingPosition():{x:number;y:number}{return {x:this.state.floatX,y:this.state.floatY};}
   get tileOrder():[TileId,TileId,TileId]{return [...this.state.tileOrder];}
   setDocked(docked:boolean):void{
@@ -139,6 +147,11 @@ export class WorkspaceLayoutController{
     const three=this.isThree();
     this.outer.classList.toggle("three-tiles",three);
     this.outer.classList.toggle("float-solid",this.state.tileMode==="float");
+    this.outer.classList.toggle("tiled-solid-hidden",
+      !this.state.tiledSolidVisible&&this.state.tileMode!=="float");
+    const visibleTiles=this.state.tileOrder.filter(id=>id!=="solid");
+    for(const [i,id] of visibleTiles.entries())
+      this.outer.style.setProperty("--tile-"+id+"-visible-col",String(i*2+1));
     this.outer.dataset.tileMode=three?"columns":this.state.tileMode;
     this.outer.dataset.tileOrder=this.state.tileOrder.join(",");
     for(const [i,id] of this.state.tileOrder.entries())

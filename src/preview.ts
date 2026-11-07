@@ -52,6 +52,7 @@ export class Preview {
   private ssaoPass:SSAOPass|null=null;
   private renderSettings:RenderSettings={...DEFAULT_RENDER_SETTINGS};
   private onFloatMove:((dx:number,dy:number)=>void)|null=null;
+  private onFloatDragEnd:(()=>void)|null=null;
 
   constructor(private readonly container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -109,7 +110,10 @@ export class Preview {
       if(surface.hasPointerCapture(event.pointerId))surface.releasePointerCapture(event.pointerId);
       this.updateFloatHit(event.clientX,event.clientY);
       // Preserve the normal pointerup → face pick when the gesture was a click.
-      if(drag.moved){event.preventDefault();event.stopImmediatePropagation();}
+      if(drag.moved){
+        this.onFloatDragEnd?.();
+        event.preventDefault();event.stopImmediatePropagation();
+      }
     };
     surface.addEventListener("pointerup",endFloat,{capture:true});
     surface.addEventListener("pointercancel",endFloat,{capture:true});
@@ -237,6 +241,9 @@ export class Preview {
   }
   setFloatDragHandler(handler:((dx:number,dy:number)=>void)|null):void{
     this.onFloatMove=handler;
+  }
+  setFloatDragEndHandler(handler:(()=>void)|null):void{
+    this.onFloatDragEnd=handler;
   }
   private toMouseAction(action:"none"|"pan"|"orbit"|"dolly"):number {
     switch(action){
@@ -701,6 +708,7 @@ export class Preview {
     this.resizeObserver.disconnect();
     document.removeEventListener("pointermove",this.onDocumentPointerMove,{capture:true});
     this.onFloatMove=null;
+    this.onFloatDragEnd=null;
     this.orbit.dispose();
     this.onFacePicked=null;
     this.onSurfaceHover=null;
