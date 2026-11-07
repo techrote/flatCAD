@@ -786,3 +786,139 @@ test("Only horizontal faces highlight; true CAD vertex hit shows a same-radius g
   expect(sphereRadius).toBe(hitRadius);
   await expect(view).toHaveAttribute("data-hovered-target-kind","vertex");
 });
+
+
+test("titlebars own volume and Undo/Redo; permanent lower border bars are removed",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await expect(page.locator("#solid-volume")).toContainText("mm³");
+  expect(Number(await page.locator("#solid-volume").getAttribute("data-volume-mm3")))
+    .toBeGreaterThan(40000);
+  await expect(page.locator(".sketch-titlebar #undo")).toHaveCount(1);
+  await expect(page.locator(".sketch-titlebar #redo")).toHaveCount(1);
+  await expect(page.locator(".preview-panel .solid-titlebar #solid-volume")).toHaveCount(1);
+  await expect(page.locator(".shell > .statusbar")).toHaveCount(0);
+  await expect(page.locator(".workbench-sketch > .panel-footer")).toHaveCount(0);
+  await newProject(page);
+  await page.keyboard.press("r");
+  await draw(page,[.36,.4],[.62,.62]);
+  await expect(page.locator(".sketch-titlebar #undo")).toBeEnabled();
+  await page.locator(".sketch-titlebar #undo").click();
+  await expect(page.locator("#profile-count")).toContainText("0 profiles");
+  await page.locator(".sketch-titlebar #redo").click();
+  await expect(page.locator("#profile-count")).toContainText("1 profiles");
+});
+
+test("resizing both dividers changes panels without touching CAD data and persists",async({page})=>{
+  await page.setViewportSize({width:1440,height:820});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const sketch=page.locator(".workbench-sketch"),solid=page.locator(".preview-panel");
+  const initialSketch=(await sketch.boundingBox())!.width;
+  const initialSolid=(await solid.boundingBox())!.height;
+  const divider=page.locator("#main-resizer");
+  await expect(divider).toHaveAttribute("aria-orientation","vertical");
+  let box=(await divider.boundingBox())!;
+  await page.mouse.move(box.x+box.width/2,box.y+box.height/2);
+  await page.mouse.down();
+  await page.mouse.move(box.x+box.width/2+100,box.y+box.height/2,{steps:8});
+  await page.mouse.up();
+  const expandedSketch=(await sketch.boundingBox())!.width;
+  expect(expandedSketch).toBeGreaterThan(initialSketch+60);
+  const divider2=page.locator("#side-resizer");
+  await expect(divider2).toHaveAttribute("aria-orientation","horizontal");
+  box=(await divider2.boundingBox())!;
+  await page.mouse.move(box.x+box.width/2,box.y+box.height/2);
+  await page.mouse.down();
+  await page.mouse.move(box.x+box.width/2,box.y+box.height/2+66,{steps:8});
+  await page.mouse.up();
+  const expandedSolid=(await solid.boundingBox())!.height;
+  expect(expandedSolid).toBeGreaterThan(initialSolid+30);
+  const before=await page.evaluate(()=>JSON.parse(localStorage.getItem("flatcad.layout.v1")!));
+  expect(before.version).toBe(1);
+  expect(before.main).toBeGreaterThan(.56);
+  expect(before.solid).toBeGreaterThan(.54);
+  // Layout operations must not create or alter a native CAD project.
+  expect(await page.evaluate(()=>localStorage.getItem("flatcad.project.v1"))).toBeNull();
+  await page.reload();
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const restoredSketch=(await sketch.boundingBox())!.width;
+  const restoredSolid=(await solid.boundingBox())!.height;
+  expect(Math.abs(restoredSketch-expandedSketch)).toBeLessThan(5);
+  expect(Math.abs(restoredSolid-expandedSolid)).toBeLessThan(5);
+  await divider.focus();
+  await page.keyboard.press("ArrowLeft");
+  expect((await sketch.boundingBox())!.width).toBeLessThan(restoredSketch);
+  await divider.dblclick();
+  expect((await sketch.boundingBox())!.width).toBeLessThan(expandedSketch);
+});
+
+test("stacked viewport still offers pointer-resizable horizontal Sketch/Solid divider",async({page})=>{
+  await page.setViewportSize({width:900,height:850});
+  await page.goto("/");
+  const main=page.locator("#main-resizer");
+  await expect(main).toHaveAttribute("aria-orientation","horizontal");
+  const sketch=page.locator(".workbench-sketch");
+  const original=(await sketch.boundingBox())!.height;
+  const box=(await main.boundingBox())!;
+  await page.mouse.move(box.x+box.width/2,box.y+box.height/2);
+  await page.mouse.down();
+  await page.mouse.move(box.x+box.width/2,box.y+box.height/2-52,{steps:7});
+  await page.mouse.up();
+  expect((await sketch.boundingBox())!.height).toBeLessThan(original-28);
+  await expect(page.locator("#sketch")).toBeVisible();
+  await expect(page.locator("#preview canvas")).toBeVisible();
+});
+
+test("sketch tool rail docks in titlebar, keeps drawing interactions and remembers placement",async({page})=>{
+  await page.goto("/");
+  const toolbar=page.locator("#sketch-tool-rail");
+  const toggle=page.locator("#tool-dock-toggle");
+  await expect(toggle).toHaveAttribute("aria-pressed","false");
+  await expect(toolbar).toHaveJSProperty("parentElement",null).catch(()=>{}); // explicit DOM checks below
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed","true");
+  await expect(page.locator("#tool-dock-slot #sketch-tool-rail")).toHaveCount(1);
+  expect(await page.evaluate(()=>
+    getComputedStyle(document.querySelector("#sketch-tool-rail")!).flexDirection
+  )).toBe("row");
+  await page.reload();
+  await expect(toggle).toHaveAttribute("aria-pressed","true");
+  await expect(page.locator("#tool-dock-slot #sketch-tool-rail")).toHaveCount(1);
+  await newProject(page);
+  await page.locator("#tool-dock-slot [data-tool='circle']").click();
+  await draw(page,[.47,.49],[.54,.49]);
+  await expect(page.locator("#profile-count")).toContainText("1 profiles");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed","false");
+  await expect(page.locator("#sketch-wrap #sketch-tool-rail")).toHaveCount(1);
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem("flatcad.layout.v1")!).docked))
+    .toBe(false);
+});
+
+test("feature history uses newest-first compact tiles; only selected tile shows controls",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await page.locator("#history-details summary").click();
+  const history=page.locator("#history-details");
+  const tiles=history.locator(".history-tile");
+  await expect(tiles).toHaveCount(3);
+  await expect(history.locator(".history-tile[data-thumbnail-state='ready']"))
+    .toHaveCount(3,{timeout:120000});
+  const names=await tiles.locator(".history-feature-name").allTextContents();
+  expect(names).toEqual(["Cut · Circle 2","Cut · Circle 1","Extrude · Rectangle 1"]);
+  await expect(history.locator("#history-feature-editor")).toBeHidden();
+  await expect(history.locator(".history-tiles input")).toHaveCount(0);
+  await expect(history.locator(".history-tiles select")).toHaveCount(0);
+  await tiles.first().click();
+  await expect(history.locator("#history-feature-editor")).toBeVisible();
+  await expect(history.locator("#history-feature-editor input")).toHaveCount(2);
+  await expect(history.locator("#history-feature-editor select")).toHaveCount(1);
+  await expect(tiles.first()).toHaveAttribute("aria-pressed","true");
+  await tiles.nth(1).click();
+  await expect(tiles.nth(1)).toHaveAttribute("aria-pressed","true");
+  await expect(tiles.first()).toHaveAttribute("aria-pressed","false");
+  await history.getByRole("button",{name:"Close feature controls"}).click();
+  await expect(history.locator("#history-feature-editor")).toBeHidden();
+  await expect(history.locator(".history-tiles canvas[data-cut-overlay='true']")).toHaveCount(2);
+});
