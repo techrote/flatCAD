@@ -2,7 +2,7 @@ import "./styles.css";
 import "./workbench.css";
 import "./layout.css";
 import {
-  DEMO, appendFeature, appendProfile, deleteProfile, newId, updateProfile, validateDocument,
+  DEMO, appendFeature, appendProfile, deleteFeature, deleteProfile, newId, updateProfile, validateDocument,
   type CadDocument, type Feature, type Profile, type Point2
 } from "./model";
 import { isClosed, translate } from "./geometry";
@@ -218,9 +218,7 @@ const parameterManager=new ParameterManager(
 const historyPanel=new FeatureHistoryPanel(
   byId("feature-list"),
   feature=>safe(()=>updateFeature(feature)),
-  feature=>safe(()=>change(validateDocument({
-    ...doc,features:doc.features.filter(f=>f.id!==feature.id)
-  }))),
+  feature=>safe(()=>change(deleteFeature(doc,feature.id))),
   (id,frame)=>inspectFeatureHistory(id,frame),
   (feature,field,raw)=>safe(()=>{
     setBoundValue("feature:"+feature.id+":"+field,raw,value=>({

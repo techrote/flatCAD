@@ -1,5 +1,5 @@
 import {describe,it,expect} from "vitest";
-import {DEMO,validateDocument} from "./model";
+import {DEMO,validateDocument,deleteFeature} from "./model";
 import {evaluateFormula,numericExpression,resolveNamedParameters,
   renameParameterReferences} from "./parameters";
 describe("exact document named-parameter expressions",()=>{
@@ -29,6 +29,15 @@ describe("exact document named-parameter expressions",()=>{
     expect(()=>validateDocument({...DEMO,bindings:[{target:"feature:base:depth",expression:"0"}]}))
       .toThrow("invalid feature");
     expect(()=>evaluateFormula("2+process.exit()",()=>0)).toThrow();
+  });
+  it("deleting a formula-bound feature keeps remaining definitions valid",()=>{
+    const x=validateDocument({...DEMO,
+      parameters:[{name:"cutDepth",expression:"10"}],
+      bindings:[{target:"feature:cut_r:depth",expression:"cutDepth"}]});
+    const removed=deleteFeature(x,"cut_r");
+    expect(removed.features).toHaveLength(2);
+    expect(removed.bindings).toEqual([]);
+    expect(removed.parameters?.[0].name).toBe("cutDepth");
   });
   it("parses arithmetic precedence and right-associative powers",()=>{
     expect(numericExpression("2+3*4",[])).toBe(14);

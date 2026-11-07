@@ -147,6 +147,14 @@ export function deleteProfile(doc: CadDocument, id: string): CadDocument {
 export function appendFeature(doc: CadDocument, feature: Feature): CadDocument {
   return validateDocument({ ...doc, features: [...doc.features, feature] });
 }
+/** Deleting an authored feature also detaches its exact-formula field bindings.
+ *  Keep the remaining formula graph and profile definitions untouched. */
+export function deleteFeature(doc:CadDocument,id:string):CadDocument{
+  return validateDocument({...doc,
+    features:doc.features.filter(f=>f.id!==id),
+    bindings:doc.bindings?.filter(b=>!b.target.startsWith("feature:"+id+":"))
+  });
+}
 export function newId(prefix: string): string {
   return prefix + "_" + crypto.randomUUID().replaceAll("-", "");
 }
