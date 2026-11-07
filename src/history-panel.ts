@@ -21,7 +21,7 @@ export class FeatureHistoryPanel {
     private readonly onUpdate:(feature:Feature)=>void,
     private readonly onDelete:(feature:Feature)=>void,
     private readonly onInspect:(id:string|null,frame:KernelHistoryFrame|null)=>void=()=>{},
-    private readonly onFormula:(feature:Feature,field:"z"|"depth",raw:string)=>void=
+    private readonly onFormula:(feature:Feature,field:"z"|"depth"|"tiltX"|"tiltY"|"twist",raw:string)=>void=
       (feature,field,raw)=>{
         const n=Number(raw);
         if(Number.isFinite(n))this.onUpdate({...feature,[field]:n});
@@ -183,6 +183,19 @@ export class FeatureHistoryPanel {
     fields.append(this.numberField("Depth",feature.depth,raw=>
       this.onFormula(feature,"depth",raw),
       doc.bindings?.find(b=>b.target==="feature:"+id+":depth")?.expression));
+    const direction=document.createElement("details");
+    direction.className="history-direction";
+    const heading=document.createElement("summary");heading.textContent="Angle / twist";
+    direction.append(heading);
+    const angles=document.createElement("div");angles.className="field-row";
+    for(const [field,title] of [
+      ["tiltX","Incline X °"],["tiltY","Incline Y °"],["twist","Axial twist °"]
+    ] as const){
+      angles.append(this.numberField(title,feature[field]??0,raw=>
+        this.onFormula(feature,field,raw),
+        doc.bindings?.find(b=>b.target==="feature:"+id+":"+field)?.expression));
+    }
+    direction.append(angles);
     const actions=document.createElement("div");
     actions.className="history-editor-actions";
     const volume=this.lastFrames?.find(frame=>frame.featureId===id);
@@ -200,7 +213,7 @@ export class FeatureHistoryPanel {
     remove.textContent="Delete feature";
     remove.onclick=()=>this.onDelete(feature);
     actions.append(remove);
-    panel.append(header,fields,actions);
+    panel.append(header,fields,direction,actions);
   }
 
   private numberField(label:string,value:number,onChange:(raw:string)=>void,

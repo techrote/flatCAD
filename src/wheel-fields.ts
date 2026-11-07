@@ -24,7 +24,7 @@ export function wheelEditedValue(
   return "("+current.trim()+")"+(delta>=0?"+":"")+Number(delta.toPrecision(13));
 }
 const TARGETS='input[type="number"],input[data-binding-target],input#extrude-z,input#extrude-depth,'+
-  '#history-feature-editor input[type="text"]';
+  '#history-feature-editor input[type="text"],#extrude-tilt-x,#extrude-tilt-y,#extrude-twist';
 export function installNumericWheel(scope:Document=document):()=>void{
   const onWheel=(event:WheelEvent)=>{
     const target=event.target;

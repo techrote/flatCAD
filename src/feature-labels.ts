@@ -20,5 +20,11 @@ export function featureLabel(doc:CadDocument,feature:Feature):string{
 export function featureExtentLabel(f:Feature):string{
   const end=f.z+f.depth;
   const depth=f.depth>0?"+"+f.depth:f.depth.toString();
-  return "Z "+f.z+" → "+end+" mm · Δ"+depth+" mm";
+  const advanced=[
+    (f.tiltX??0)!==0?"X "+f.tiltX+"°":"",
+    (f.tiltY??0)!==0?"Y "+f.tiltY+"°":"",
+    (f.twist??0)!==0?"Twist "+f.twist+"°":""
+  ].filter(Boolean).join(" · ");
+  return "Z "+f.z+" → "+end+" mm · Δ"+depth+" mm"+
+    (advanced?" · "+advanced:"");
 }

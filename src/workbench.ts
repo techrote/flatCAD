@@ -94,6 +94,11 @@ root.innerHTML=[
   '            <label class="field"><span>Depth · mm</span><input type="text" inputmode="decimal" id="extrude-depth" value="8" title="Signed depth: negative extrudes down; click a horizontal face for a target elevation"></label></div>',
   '          <label class="check through-all"><input type="checkbox" id="extrude-through"> Through all (cut)</label>',
   '          <label class="check live-preview"><input type="checkbox" id="extrude-preview" checked> Preview in solid view</label>',
+  '          <details id="extrude-direction-details" class="extrude-direction-details"><summary>Angle / axial twist</summary>',
+  '            <div class="field-row"><label class="field"><span>Incline X °</span><input id="extrude-tilt-x" type="text" inputmode="decimal" value="0" aria-label="Incline X degrees"></label>',
+  '              <label class="field"><span>Incline Y °</span><input id="extrude-tilt-y" type="text" inputmode="decimal" value="0" aria-label="Incline Y degrees"></label></div>',
+  '            <label class="field"><span>Axial twist °</span><input id="extrude-twist" type="text" inputmode="decimal" value="0" aria-label="Axial twist degrees"></label>',
+  '          </details>',
   '          <div class="flyout-face-hint">ⓘ Click a horizontal face in Solid view to fill the last-focused <strong>Start Z</strong> or <strong>Depth</strong> field.</div>',
   '          <span id="extrude-preview-error" class="preview-error" role="status" hidden></span>',
   '          <div class="form-actions"><button id="apply-extrude" class="button primary">Apply <kbd>Enter</kbd></button><button id="dismiss-extrude" class="button muted-button">Cancel</button></div>',
@@ -768,9 +773,13 @@ function throughAllBounds():[number,number] {
   }
   return [-1,9];
 }
-function extrusionNumbers():{z:number,depth:number}{
-  return {z:numericExpression(input("extrude-z").value,doc.parameters??[]),
-    depth:numericExpression(input("extrude-depth").value,doc.parameters??[])};
+function extrusionNumbers():{z:number,depth:number,tiltX:number,tiltY:number,twist:number}{
+  const named=doc.parameters??[];
+  return {z:numericExpression(input("extrude-z").value,named),
+    depth:numericExpression(input("extrude-depth").value,named),
+    tiltX:numericExpression(input("extrude-tilt-x").value,named),
+    tiltY:numericExpression(input("extrude-tilt-y").value,named),
+    twist:numericExpression(input("extrude-twist").value,named)};
 }
 function resolveMode(): "add" | "cut" {
   const manual=select("extrude-mode").value;
@@ -945,14 +954,14 @@ function scheduleOperationPreview():void {
   delete host.dataset.previewVolumeMm3;
   delete host.dataset.previewOperation;
   const source=doc,ids=[...extrudeTargets],mode=resolveMode();
-  let z=NaN,depth=NaN;
-  try{({z,depth}=extrusionNumbers());}
+  let z=NaN,depth=NaN,tiltX=NaN,tiltY=NaN,twist=NaN;
+  try{({z,depth,tiltX,tiltY,twist}=extrusionNumbers());}
   catch{/* Show validation in provisional preview, never mutate the document. */}
   previewTimer=setTimeout(async()=>{
     if(token!==previewToken)return;
     let candidate:CadDocument;
     try{
-      candidate=documentWithExtrusions(source,ids,mode,z,depth);
+      candidate=documentWithExtrusions(source,ids,mode,z,depth,{tiltX,tiltY,twist});
     }catch(e){
       if(token===previewToken){restoreCommittedPreview();previewError(e);}
       return;
@@ -1069,6 +1078,10 @@ function openExtrude(id?:string,operation?:"add"|"cut",at?:Point2):void {
       Math.abs(f.z+f.depth-lastSurfaceZ!)<.001)?lastSurfaceZ:0;
   input("extrude-z").value=String(remembered);
   input("extrude-depth").value="8";
+  input("extrude-tilt-x").value="0";
+  input("extrude-tilt-y").value="0";
+  input("extrude-twist").value="0";
+  byId<HTMLDetailsElement>("extrude-direction-details").open=false;
   input("extrude-through").checked=false;
   input("extrude-preview").checked=previewEnabled;
   updateExtrudeMode();
@@ -1082,9 +1095,9 @@ function applyExtrude():void {
   const zExpr=input("extrude-z").value.trim(),depthExpr=input("extrude-depth").value.trim();
   const ids=[...extrudeTargets];
   safe(()=>{
-    const {z,depth}=extrusionNumbers();
-    // One atomic history action; bind the new exact scalar values to formulas.
-    const result=documentWithExtrusions(doc,ids,mode,z,depth);
+    const {z,depth,tiltX,tiltY,twist}=extrusionNumbers();
+    // One atomic history action; bind all exact values to formulas.
+    const result=documentWithExtrusions(doc,ids,mode,z,depth,{tiltX,tiltY,twist});
     const newFeatures=result.features.slice(doc.features.length);
     const bindings=[...(result.bindings??[])];
     for(const feature of newFeatures){
@@ -1092,6 +1105,12 @@ function applyExtrude():void {
         bindings.push({target:"feature:"+feature.id+":z",expression:zExpr});
       if(!isNumericLiteral(depthExpr))
         bindings.push({target:"feature:"+feature.id+":depth",expression:depthExpr});
+      for(const [key,raw] of [["tiltX",input("extrude-tilt-x").value.trim()],
+        ["tiltY",input("extrude-tilt-y").value.trim()],
+        ["twist",input("extrude-twist").value.trim()]] as const){
+        if(!isNumericLiteral(raw))bindings.push({
+          target:"feature:"+feature.id+":"+key,expression:raw});
+      }
     }
     const bound=validateDocument({...result,bindings});
     closeExtrude();
@@ -1428,6 +1447,11 @@ button("cancel-extrude").onclick=closeExtrude;
 button("dismiss-extrude").onclick=closeExtrude;
 button("apply-extrude").onclick=applyExtrude;
 select("extrude-mode").addEventListener("change",updateExtrudeMode);
+for(const name of ["extrude-tilt-x","extrude-tilt-y","extrude-twist"]){
+  input(name).addEventListener("input",()=>{
+    scheduleOperationPreview();
+  });
+}
 input("extrude-preview").onchange=()=>{
   previewEnabled=input("extrude-preview").checked;
   scheduleOperationPreview();
