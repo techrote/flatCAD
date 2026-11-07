@@ -1312,3 +1312,31 @@ test("negative signed inclined cut generates full exact tool with no geometric m
   const latest=doc.features.at(-1);
   expect(latest).toMatchObject({operation:"cut",z:8,depth:-10,tiltX:10});
 });
+
+test("axially twisted cutter subtracts real B-rep material and exports STEP",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const originalVolume=Number(await page.locator("#status").getAttribute("data-volume-mm3"));
+  await page.keyboard.press("r");
+  await draw(page,[.47,.45],[.56,.55]);
+  await page.keyboard.press("e");
+  await expect(page.locator("#extrude-flyout")).toBeVisible();
+  await page.locator("#extrude-mode").selectOption("cut");
+  await page.locator("#extrude-direction-details summary").click();
+  await page.locator("#extrude-twist").fill("45");
+  await expect(page.locator("#preview")).toHaveAttribute("data-preview-state","ready",{timeout:120000});
+  await expect(page.locator("#preview")).toHaveAttribute("data-cut-tool-visible","true");
+  const toolVolume=Number(await page.locator("#preview").getAttribute("data-cut-tool-volume-mm3"));
+  expect(toolVolume).toBeGreaterThan(0);
+  await page.locator("#apply-extrude").click();
+  await expect(page.locator("#status")).toContainText("Exact solid generated",{timeout:120000});
+  const after=Number(await page.locator("#status").getAttribute("data-volume-mm3"));
+  expect(after).toBeLessThan(originalVolume);
+  const result=await saveProject(page);
+  expect(result.features.at(-1)).toMatchObject({operation:"cut",twist:45});
+  const pending=page.waitForEvent("download",{timeout:120000});
+  await openMenu(page,"file","file.step");
+  const exported=await pending;
+  const bytes=await readFile((await exported.path())!);
+  expect(bytes.subarray(0,300).toString()).toContain("ISO-10303-21");
+});
