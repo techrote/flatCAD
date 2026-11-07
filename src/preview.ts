@@ -1,5 +1,10 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { SSAOPass } from "three/addons/postprocessing/SSAOPass.js";
+import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import {DEFAULT_RENDER_SETTINGS,effectivePixelRatio,type RenderSettings} from "./render-settings";
 import type { GeometryMesh } from "./kernel-protocol";
 import { dragAction, orbitControlsBinding, type NavigationPreset } from "./navigation";
 import { exactFaceElevation } from "./signed-extrusion";
@@ -43,6 +48,9 @@ export class Preview {
   private floatDrag:{pointerId:number;startX:number;startY:number;x:number;y:number;moved:boolean}|null=null;
   private disposed=false;
   private renderCount=0;
+  private composer:EffectComposer|null=null;
+  private ssaoPass:SSAOPass|null=null;
+  private renderSettings:RenderSettings={...DEFAULT_RENDER_SETTINGS};
   private onFloatMove:((dx:number,dy:number)=>void)|null=null;
 
   constructor(private readonly container: HTMLElement) {
@@ -469,6 +477,7 @@ export class Preview {
         this.renderer.setSize(width,height,false);
         this.bufferWidth=width;
         this.bufferHeight=height;
+        this.composer?.setSize(width,height);
         this.container.dataset.rendererResizeCount=String(
           (Number(this.container.dataset.rendererResizeCount)||0)+1);
       }
@@ -622,9 +631,48 @@ export class Preview {
   }
   private drawFrame():void{
     if(this.disposed)return;
-    this.renderer.render(this.scene,this.camera);
+    if(this.renderSettings.ambientOcclusion&&this.composer)this.composer.render();
+    else this.renderer.render(this.scene,this.camera);
     this.renderCount++;
     this.container.dataset.frameCount=String(this.renderCount);
+  }
+  private initComposer():void{
+    if(this.composer)return;
+    const composer=new EffectComposer(this.renderer);
+    composer.addPass(new RenderPass(this.scene,this.camera));
+    const ao=new SSAOPass(this.scene,this.camera,
+      this.bufferWidth||512,this.bufferHeight||512,8);
+    ao.kernelRadius=8;
+    ao.minDistance=.005;
+    ao.maxDistance=.12;
+    composer.addPass(ao);
+    composer.addPass(new OutputPass());
+    this.composer=composer;
+    this.ssaoPass=ao;
+    const ratio=Number(this.container.dataset.pixelRatio)||
+      Math.min(window.devicePixelRatio||1,2);
+    composer.setPixelRatio(ratio);
+    composer.setSize(this.bufferWidth||512,this.bufferHeight||512);
+  }
+  /** AO is a genuine screen-space pass. SSAA raises render resolution and
+   * downsamples via canvas presentation, under a bounded framebuffer budget.
+   * Both are off by default and remain entirely presentation-only.
+   */
+  setRenderSettings(settings:RenderSettings):void{
+    this.renderSettings={...settings};
+    if(settings.ambientOcclusion)this.initComposer();
+    if(this.ssaoPass)this.ssaoPass.enabled=settings.ambientOcclusion;
+    const width=Math.max(1,this.container.clientWidth),
+      height=Math.max(1,this.container.clientHeight);
+    const ratio=effectivePixelRatio(settings,window.devicePixelRatio||1,width,height);
+    this.renderer.setPixelRatio(ratio);
+    this.composer?.setPixelRatio(ratio);
+    this.container.dataset.pixelRatio=String(ratio);
+    this.container.dataset.aoEnabled=String(settings.ambientOcclusion);
+    this.container.dataset.supersample=String(settings.supersampling);
+    this.bufferWidth=0;this.bufferHeight=0;
+    this.resize();
+    this.requestRender();
   }
   homeView():void{this.orientHome(false);}
   undergroundHome():void{this.orientHome(true);}
@@ -660,6 +708,8 @@ export class Preview {
     this.clearHighlight();
     this.setMesh(null);
     this.setCommittedPickMesh(null);
+    this.ssaoPass?.dispose();
+    this.composer?.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
