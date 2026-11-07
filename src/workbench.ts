@@ -1,5 +1,6 @@
 import "./styles.css";
 import "./workbench.css";
+import "./layout.css";
 import {
   DEMO, appendFeature, appendProfile, deleteProfile, newId, updateProfile, validateDocument,
   type CadDocument, type Feature, type Profile, type Point2
