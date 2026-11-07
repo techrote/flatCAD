@@ -40,6 +40,8 @@ type Entry={descriptor:FloatDescriptor;panel:HTMLElement;host:HTMLElement;
 export class FloatRenderManager{
   readonly layer:HTMLElement;
   private readonly entries=new Map<string,Entry>();
+  // The DOM order is stable for persisted view IDs; visual stacking is not.
+  private foreground=0;
   private currentMesh:GeometryMesh|null=null;
   private currentOptions:NonNullable<Parameters<Preview["setMesh"]>[1]>={};
   private currentElevations:number[]=[];
@@ -130,6 +132,12 @@ export class FloatRenderManager{
     }
     const entry:Entry={descriptor:{...descriptor},panel,host,label,preview,left:0,top:0};
     this.entries.set(descriptor.id,entry);
+    // Navigation controls must foreground the selected view, otherwise a
+    // newer overlapping canvas can intercept an intended object drag.
+    // Keep DOM order stable so persisted descriptor identity is unchanged.
+    panel.addEventListener("pointerdown",()=>this.activate(entry),{capture:true});
+    panel.addEventListener("focusin",()=>this.activate(entry));
+    this.activate(entry);
     preview.setFloatDragHandler((dx,dy)=>this.drag(entry,dx,dy));
     preview.setFloatDragEndHandler(()=>this.persist());
     preview.setSurfaceHoverHandler((target,pointer)=>this.onHover(entry,target,pointer));
@@ -142,6 +150,9 @@ export class FloatRenderManager{
     }
     preview.setHistoryInspection(this.currentInspection);
     if(save)this.persist();
+  }
+  private activate(entry:Entry):void{
+    entry.panel.style.zIndex=String(++this.foreground);
   }
   private onHover(e:Entry,target:SurfaceTarget|null,pointer:{x:number;y:number}):void{
     const label=e.label;
