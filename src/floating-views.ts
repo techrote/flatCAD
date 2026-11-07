@@ -14,6 +14,7 @@ import {Preview} from "./preview";
 import {createRenderNav} from "./render-nav";
 
 const STORAGE_KEY="flatcad.floating-views.v1";
+const ACTIVE_KEY="flatcad.floating-active.v1";
 export const MAX_FLOAT_VIEWS=3;
 export type FloatDescriptor={id:string;x:number;y:number};
 export function validateFloatDescriptors(raw:unknown):FloatDescriptor[]{
@@ -42,6 +43,7 @@ export class FloatRenderManager{
   private readonly entries=new Map<string,Entry>();
   // The DOM order is stable for persisted view IDs; visual stacking is not.
   private foreground=0;
+  private activeId:string|null=null;
   private currentMesh:GeometryMesh|null=null;
   private currentOptions:NonNullable<Parameters<Preview["setMesh"]>[1]>={};
   private currentElevations:number[]=[];
@@ -57,7 +59,14 @@ export class FloatRenderManager{
     layer.className="floating-views-layer";
     document.querySelector(".shell")!.append(layer);
     this.layer=layer;
+    // Restore last active stacking separately from the persisted positions.
+    // Otherwise another floating view can cover its navigation/Close controls
+    // following a reload, even after a user deliberately foregrounded it.
+    let lastActive:string|null=null;
+    try{lastActive=localStorage.getItem(ACTIVE_KEY);}catch{/* optional UI state */}
     for(const descriptor of load())this.insert(descriptor,false);
+    const active=lastActive?this.entries.get(lastActive):undefined;
+    if(active)this.activate(active,false);
     window.addEventListener("resize",()=>this.resizeAll());
   }
   get count():number{return this.entries.size;}
@@ -77,6 +86,13 @@ export class FloatRenderManager{
     e.preview.dispose();
     e.panel.remove();
     this.persist();
+    if(this.activeId===id){
+      this.activeId=null;
+      const top=[...this.entries.values()].sort((a,b)=>
+        Number(b.panel.style.zIndex)-Number(a.panel.style.zIndex))[0];
+      if(top)this.activate(top);
+      else try{localStorage.removeItem(ACTIVE_KEY);}catch{/* optional */}
+    }
   }
   removeAll():void{for(const id of this.ids())this.remove(id);}
   setMesh(mesh:GeometryMesh|null,options:Parameters<Preview["setMesh"]>[1]={}):void{
@@ -137,7 +153,7 @@ export class FloatRenderManager{
     // Keep DOM order stable so persisted descriptor identity is unchanged.
     panel.addEventListener("pointerdown",()=>this.activate(entry),{capture:true});
     panel.addEventListener("focusin",()=>this.activate(entry));
-    this.activate(entry);
+    this.activate(entry,save);
     preview.setFloatDragHandler((dx,dy)=>this.drag(entry,dx,dy));
     preview.setFloatDragEndHandler(()=>this.persist());
     preview.setSurfaceHoverHandler((target,pointer)=>this.onHover(entry,target,pointer));
@@ -151,8 +167,12 @@ export class FloatRenderManager{
     preview.setHistoryInspection(this.currentInspection);
     if(save)this.persist();
   }
-  private activate(entry:Entry):void{
+  private activate(entry:Entry,save=true):void{
+    if(this.activeId===entry.descriptor.id)return;
+    this.activeId=entry.descriptor.id;
     entry.panel.style.zIndex=String(++this.foreground);
+    if(save)try{localStorage.setItem(ACTIVE_KEY,entry.descriptor.id);}
+    catch{/* optional UI preference; never block CAD interaction */}
   }
   private onHover(e:Entry,target:SurfaceTarget|null,pointer:{x:number;y:number}):void{
     const label=e.label;
