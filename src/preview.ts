@@ -40,7 +40,9 @@ export class Preview {
   private bufferWidth=0;
   private bufferHeight=0;
   private floating=false;
-  private floatDrag:{pointerId:number;x:number;y:number}|null=null;
+  private floatDrag:{pointerId:number;startX:number;startY:number;x:number;y:number;moved:boolean}|null=null;
+  private disposed=false;
+  private renderCount=0;
   private onFloatMove:((dx:number,dy:number)=>void)|null=null;
 
   constructor(private readonly container: HTMLElement) {
@@ -58,7 +60,7 @@ export class Preview {
     // the user was drawing or applying a feature.
     this.orbit.enableDamping = false;
     this.orbit.target.set(0, 0, 0);
-    this.orbit.addEventListener("change",()=>this.recordCameraState());
+    this.orbit.addEventListener("change",()=>{this.recordCameraState();this.requestRender();});
     this.setNavigationPreset("fusion");
 
     // Capture is necessary: OrbitControls reads the selected mouse action on
@@ -74,15 +76,20 @@ export class Preview {
         return;
       }
       if(event.button!==0)return; // MMB/RMB retain configured CAD navigation.
-      this.floatDrag={pointerId:event.pointerId,x:event.clientX,y:event.clientY};
+      // Short left clicks remain available for face elevation selection.
+      // Only begin moving the floating view beyond four CSS pixels.
+      this.floatDrag={pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,
+        x:event.clientX,y:event.clientY,moved:false};
       surface.setPointerCapture(event.pointerId);
-      this.container.dataset.floatDragging="true";
-      event.preventDefault();event.stopImmediatePropagation();
     },{capture:true});
     surface.addEventListener("pointermove",event=>{
       const drag=this.floatDrag;
       if(!drag||drag.pointerId!==event.pointerId)return;
       const dx=event.clientX-drag.x,dy=event.clientY-drag.y;
+      if(!drag.moved&&Math.hypot(event.clientX-drag.startX,
+        event.clientY-drag.startY)<=4)return;
+      drag.moved=true;
+      this.container.dataset.floatDragging="true";
       drag.x=event.clientX;drag.y=event.clientY;
       this.onFloatMove?.(dx,dy);
       event.preventDefault();event.stopImmediatePropagation();
@@ -93,7 +100,8 @@ export class Preview {
       delete this.container.dataset.floatDragging;
       if(surface.hasPointerCapture(event.pointerId))surface.releasePointerCapture(event.pointerId);
       this.updateFloatHit(event.clientX,event.clientY);
-      event.preventDefault();event.stopImmediatePropagation();
+      // Preserve the normal pointerup → face pick when the gesture was a click.
+      if(drag.moved){event.preventDefault();event.stopImmediatePropagation();}
     };
     surface.addEventListener("pointerup",endFloat,{capture:true});
     surface.addEventListener("pointercancel",endFloat,{capture:true});
@@ -180,7 +188,7 @@ export class Preview {
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(container);
     this.resize();
-    this.animate();
+    this.requestRender();
   }
 
   /** Hit-test only the current displayed B-rep-derived solid, not empty
@@ -217,7 +225,7 @@ export class Preview {
     this.container.dataset.floating=String(enabled);
     this.container.dataset.floatHover="false";
     if(!enabled)this.floatDrag=null;
-    this.renderer.render(this.scene,this.camera);
+    this.requestRender();
   }
   setFloatDragHandler(handler:((dx:number,dy:number)=>void)|null):void{
     this.onFloatMove=handler;
@@ -351,6 +359,7 @@ export class Preview {
       sphere.position.copy(v);
       sphere.renderOrder=16;
       this.scene.add(sphere);
+      this.requestRender();
       this.hoveredHighlight=sphere;
       this.hoveredKey=key;
       this.container.dataset.hoveredTargetKind="vertex";
@@ -412,6 +421,7 @@ export class Preview {
     }));
     this.hoveredHighlight.renderOrder=10;
     this.scene.add(this.hoveredHighlight);
+    this.requestRender();
     this.hoveredKey=key;
     this.container.dataset.hoveredTargetKind=hit.target.kind;
     if(hit.target.z!==null)this.container.dataset.hoveredFaceZ=String(hit.target.z);
@@ -424,6 +434,7 @@ export class Preview {
       this.hoveredHighlight.geometry.dispose();
       (this.hoveredHighlight.material as THREE.Material).dispose();
       this.hoveredHighlight=null;
+      this.requestRender();
     }
     this.hoveredKey="";
     delete this.container.dataset.hoveredFaceZ;
@@ -461,13 +472,13 @@ export class Preview {
         this.container.dataset.rendererResizeCount=String(
           (Number(this.container.dataset.rendererResizeCount)||0)+1);
       }
-      this.renderer.render(this.scene,this.camera);
+      this.drawFrame();
     };
     if(this.bufferWidth===0)commit();
     else{
       // Keep drawing into the existing backing buffer until the pointer
       // stops. The canvas CSS stretches it without exposing blank pixels.
-      this.renderer.render(this.scene,this.camera);
+      this.drawFrame();
       this.resizeTimer=setTimeout(commit,120);
     }
   }
@@ -494,6 +505,7 @@ export class Preview {
       if(this.object)this.retireGroup(this.object);
       this.object=null;
       if(!options.pending)this.setCommittedPickMesh(null);
+      this.requestRender();
       this.referenceGrid.position.z=0;
       this.container.dataset.gridZ="0";
       this.container.dataset.renderedSolid="false";
@@ -552,6 +564,7 @@ export class Preview {
         this.hasFramedSolid=true;
       }
       this.recordCameraState();
+      this.requestRender();
     }catch(error){
       // An incomplete candidate never leaves the viewport blank.
       if(this.object===group){this.object=null;this.scene.remove(group);}
@@ -597,13 +610,44 @@ export class Preview {
     this.frameBounds(new THREE.Box3().setFromObject(this.object));
     this.hasFramedSolid=true;
   }
-  private animate = (): void => {
-    this.animationId = requestAnimationFrame(this.animate);
+  /** GPU frames are produced only for changes, never unconditionally while
+   * Sketch is active. OrbitControls emits changes during real navigation.
+   */
+  private requestRender():void{
+    if(this.disposed||this.animationId)return;
+    this.animationId=requestAnimationFrame(()=>{
+      this.animationId=0;
+      if(!this.disposed)this.drawFrame();
+    });
+  }
+  private drawFrame():void{
+    if(this.disposed)return;
+    this.renderer.render(this.scene,this.camera);
+    this.renderCount++;
+    this.container.dataset.frameCount=String(this.renderCount);
+  }
+  homeView():void{this.orientHome(false);}
+  undergroundHome():void{this.orientHome(true);}
+  private orientHome(under:boolean):void{
+    const distance=Math.max(10,this.camera.position.distanceTo(this.orbit.target));
+    const direction=new THREE.Vector3(130,-125,under?-115:115).normalize();
+    this.camera.position.copy(this.orbit.target).addScaledVector(direction,distance);
+    this.camera.up.set(0,0,1);
     this.orbit.update();
-    this.renderer.render(this.scene, this.camera);
-  };
+    this.container.dataset.homeMode=under?"underground":"standard";
+    this.requestRender();
+  }
+  oppositeOrbit():void{
+    const offset=this.camera.position.clone().sub(this.orbit.target);
+    offset.x*=-1;offset.y*=-1;
+    this.camera.position.copy(this.orbit.target).add(offset);
+    this.orbit.update();
+    this.container.dataset.homeMode="opposite";
+    this.requestRender();
+  }
 
   dispose(): void {
+    this.disposed=true;
     cancelAnimationFrame(this.animationId);
     clearTimeout(this.resizeTimer);
     this.resizeObserver.disconnect();
