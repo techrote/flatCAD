@@ -912,8 +912,11 @@ test("landscape timeline runs oldest first; only selected tile shows controls",a
   await expect(history.locator(".history-tiles select")).toHaveCount(0);
   await tiles.first().click();
   await expect(history.locator("#history-feature-editor")).toBeVisible();
-  await expect(history.locator("#history-feature-editor input")).toHaveCount(2);
+  await expect(history.locator("#history-feature-editor > .field-row input")).toHaveCount(2);
   await expect(history.locator("#history-feature-editor select")).toHaveCount(1);
+  // Optional angle/twist controls are present but collapsed by default.
+  await expect(history.locator(".history-direction")).not.toHaveAttribute("open",/./);
+  await expect(history.locator(".history-direction input")).toHaveCount(3);
   await expect(tiles.first()).toHaveAttribute("aria-pressed","true");
   await tiles.nth(1).click();
   await expect(tiles.nth(1)).toHaveAttribute("aria-pressed","true");
