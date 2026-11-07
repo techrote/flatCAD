@@ -1282,7 +1282,7 @@ test("View/Layout/Render menu separation and optional AO/SSAA preserve source ge
   await expect(page.locator("#preview")).toHaveAttribute("data-supersample","1.5");
 });
 
-test("multiple floating renders preserve independent cameras and optionally hidden tiled Solid",async({page})=>{
+test("multiple floating renders preserve independent cameras and optionally hidden tiled Solid",async({page},testInfo)=>{
   await page.setViewportSize({width:1500,height:860});
   await page.goto("/");
   await expect(page.locator("#status")).toContainText("Exact solid generated");
@@ -1307,6 +1307,7 @@ test("multiple floating renders preserve independent cameras and optionally hidd
     .split(",").map(Number);
   expect(d1[2]).toBeLessThan(0);
   expect(d2[2]).toBeGreaterThan(0);
+  await page.screenshot({path:testInfo.outputPath("independent-floating-cameras.png")});
   await openMenu(page,"layout","dialog.layout");
   await page.locator("#tiled-solid-visible").uncheck();
   await expect(page.locator("#workbench-layout")).toHaveClass(/tiled-solid-hidden/);
@@ -1324,6 +1325,7 @@ test("multiple floating renders preserve independent cameras and optionally hidd
   const after=(await first.boundingBox())!;
   expect(after.x).toBeGreaterThan(coords.x+20);
   expect(after.y).toBeGreaterThan(coords.y+15);
+  await page.screenshot({path:testInfo.outputPath("dragged-view-and-hidden-tile.png")});
   await page.reload();
   await expect(views).toHaveCount(2);
   const restored=(await views.first().boundingBox())!;
