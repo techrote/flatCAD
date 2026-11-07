@@ -1438,8 +1438,8 @@ input("render-ao").onchange=()=>applyRenderSettings({
   ...renderSettings,ambientOcclusion:input("render-ao").checked
 });
 select("render-supersampling").onchange=()=>applyRenderSettings({
-  ...renderSettings,supersampling:Number(select("render-supersampling").value)
-    as RenderSettings["supersampling"]
+  ...renderSettings,supersampling:
+    (Number(select("render-supersampling").value) as RenderSettings["supersampling"])
 });
 button("render-reset").onclick=()=>applyRenderSettings({...DEFAULT_RENDER_SETTINGS});
 button("tile-reset").onclick=()=>{
