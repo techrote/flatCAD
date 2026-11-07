@@ -88,8 +88,8 @@ root.innerHTML=[
   '          <div class="flyout-head"><strong>Extrude</strong><button id="cancel-extrude" aria-label="Cancel extrusion">×</button></div>',
   '          <div id="extrude-target" class="flyout-subtitle"></div>',
   '          <label class="field"><span>Operation</span><select id="extrude-mode"><option value="auto">Auto</option><option value="add">Add / Join</option><option value="cut">Cut</option></select></label>',
-  '          <div class="field-row"><label class="field"><span>Start Z · mm</span><input type="number" step="any" id="extrude-z" value="0" title="Click a horizontal face in Solid view to fill Start Z"></label>',
-  '            <label class="field"><span>Depth · mm</span><input type="number" step="any" id="extrude-depth" value="8" title="Signed depth: negative extrudes down; click a horizontal face for a target elevation"></label></div>',
+  '          <div class="field-row"><label class="field"><span>Start Z · mm</span><input type="text" inputmode="decimal" id="extrude-z" value="0" title="Click a horizontal face in Solid view to fill Start Z"></label>',
+  '            <label class="field"><span>Depth · mm</span><input type="text" inputmode="decimal" id="extrude-depth" value="8" title="Signed depth: negative extrudes down; click a horizontal face for a target elevation"></label></div>',
   '          <label class="check through-all"><input type="checkbox" id="extrude-through"> Through all (cut)</label>',
   '          <label class="check live-preview"><input type="checkbox" id="extrude-preview" checked> Preview in solid view</label>',
   '          <div class="flyout-face-hint">ⓘ Click a horizontal face in Solid view to fill the last-focused <strong>Start Z</strong> or <strong>Depth</strong> field.</div>',
@@ -709,6 +709,10 @@ function throughAllBounds():[number,number] {
   }
   return [-1,9];
 }
+function extrusionNumbers():{z:number,depth:number}{
+  return {z:numericExpression(input("extrude-z").value,doc.parameters??[]),
+    depth:numericExpression(input("extrude-depth").value,doc.parameters??[])};
+}
 function resolveMode(): "add" | "cut" {
   const manual=select("extrude-mode").value;
   if(manual==="add"||manual==="cut")return manual;
@@ -743,10 +747,9 @@ function fillFocusedFieldFromFace(z:number|null):void {
   if(facePickField==="z"){
     field.value=String(z);
   }else{
-    const start=Number(input("extrude-z").value);
-    if(!Number.isFinite(start)){
-      status("Enter a valid Start Z before picking target Depth",true);return;
-    }
+    let start:number;
+    try{start=numericExpression(input("extrude-z").value,doc.parameters??[]);}
+    catch{status("Enter a valid Start Z before picking target Depth",true);return;}
     const signed=depthToFace(start,z);
     if(signed===0){
       status("Target face is level with Start Z: depth cannot be zero",true);return;
@@ -754,7 +757,9 @@ function fillFocusedFieldFromFace(z:number|null):void {
     field.value=String(signed);
   }
   input("extrude-through").checked=false;
-  const depth=Number(input("extrude-depth").value);
+  let depth=0;
+  try{depth=numericExpression(input("extrude-depth").value,doc.parameters??[]);}
+  catch{/* Retain last valid arrow while the text expression is being edited. */}
   if(extrudeTarget&&Number.isFinite(depth)&&depth!==0)
     canvas.setExtrudeHandle({id:extrudeTarget,depth});
   const host=byId("preview");
@@ -872,7 +877,9 @@ function scheduleOperationPreview():void {
   delete host.dataset.previewVolumeMm3;
   delete host.dataset.previewOperation;
   const source=doc,ids=[...extrudeTargets],mode=resolveMode();
-  const z=Number(input("extrude-z").value),depth=Number(input("extrude-depth").value);
+  let z=NaN,depth=NaN;
+  try{({z,depth}=extrusionNumbers());}
+  catch{/* Show validation in provisional preview, never mutate the document. */}
   previewTimer=setTimeout(async()=>{
     if(token!==previewToken)return;
     let candidate:CadDocument;
@@ -1004,13 +1011,23 @@ function openExtrude(id?:string,operation?:"add"|"cut",at?:Point2):void {
 function applyExtrude():void {
   if(!extrudeTargets.length)return;
   const mode=resolveMode();
-  const z=Number(input("extrude-z").value),depth=Number(input("extrude-depth").value);
+  const zExpr=input("extrude-z").value.trim(),depthExpr=input("extrude-depth").value.trim();
   const ids=[...extrudeTargets];
   safe(()=>{
-    // One atomic document-history step for an arbitrary Ctrl-selected group.
+    const {z,depth}=extrusionNumbers();
+    // One atomic history action; bind the new exact scalar values to formulas.
     const result=documentWithExtrusions(doc,ids,mode,z,depth);
+    const newFeatures=result.features.slice(doc.features.length);
+    const bindings=[...(result.bindings??[])];
+    for(const feature of newFeatures){
+      if(!isNumericLiteral(zExpr))
+        bindings.push({target:"feature:"+feature.id+":z",expression:zExpr});
+      if(!isNumericLiteral(depthExpr))
+        bindings.push({target:"feature:"+feature.id+":depth",expression:depthExpr});
+    }
+    const bound=validateDocument({...result,bindings});
     closeExtrude();
-    change(result);
+    change(bound);
     setTool("select");
   });
 }
@@ -1349,12 +1366,14 @@ input("extrude-through").onchange=()=>{
     const [min,max]=throughAllBounds();
     input("extrude-z").value=String(min);input("extrude-depth").value=String(max-min);
   }
-  canvas.setExtrudeHandle({id:extrudeTarget||"",depth:Number(input("extrude-depth").value)||8});
+  canvas.setExtrudeHandle({id:extrudeTarget||"",depth:extrusionNumbers().depth||8});
   scheduleOperationPreview();
 };
 input("extrude-depth").oninput=()=>{
   if(!extrudeTarget)return;
-  const depth=Number(input("extrude-depth").value);
+  let depth=NaN;
+  try{depth=numericExpression(input("extrude-depth").value,doc.parameters??[]);}
+  catch{/* Editing a partial formula must not throw during pointer feedback. */}
   input("extrude-through").checked=false;
   // Never silently rewrite an explicit/face-picked start plane.
   if(Number.isFinite(depth)&&depth!==0)
