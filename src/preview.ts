@@ -45,7 +45,10 @@ export class Preview {
     this.camera.up.set(0, 0, 1);
     this.camera.position.set(130, -125, 115);
     this.orbit = new OrbitControls(this.camera, this.renderer.domElement);
-    this.orbit.enableDamping = true;
+    // CAD should stop moving when a navigation drag ends. OrbitControls
+    // damping kept rotating for seconds, causing apparent camera drift while
+    // the user was drawing or applying a feature.
+    this.orbit.enableDamping = false;
     this.orbit.target.set(0, 0, 0);
     this.orbit.addEventListener("change",()=>this.recordCameraState());
     this.setNavigationPreset("fusion");

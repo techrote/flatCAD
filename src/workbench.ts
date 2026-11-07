@@ -1148,7 +1148,7 @@ document.addEventListener("keydown",event=>{
   const selectedShortcut=Object.entries(prefs.shortcuts).find(([,value])=>value===chord)?.[0];
   if(selectedShortcut){event.preventDefault();command(selectedShortcut);return;}
   if(chord==="Control+KeyY"){event.preventDefault();undoRedo(historyIndex+1);return;}
-  if(chord==="KeyF"){event.preventDefault();preview?.fitView();return;}
+  // Fit uses the normal user-configurable shortcut map, like other tools.
   if(chord==="Escape"){
     if(!byId("face-context-menu").hidden)hideSurfaceContext();
     else if(activeMenu)closeMenu();else setTool("select");return;
