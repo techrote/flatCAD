@@ -1,9 +1,24 @@
-/** Local UI-only split positions, independent of the exact CAD document. */
+/** UI-only panel geometry and ordering, independent of exact CAD state.
+ *  Legacy layout v1 JSON migrates transparently to the expanded contract.
+ */
 export type LayoutAxis="horizontal"|"vertical";
-export type LayoutState={version:1;main:number;solid:number;docked:boolean};
+export type TileId="sketch"|"solid"|"properties";
+export type TileMode="split"|"columns";
+export type LayoutState={
+  version:1;main:number;solid:number;docked:boolean;
+  tileMode:TileMode;tileOrder:[TileId,TileId,TileId];dockX:number;
+};
 export const LAYOUT_KEY="flatcad.layout.v1";
-export const DEFAULT_LAYOUT:LayoutState={version:1,main:.56,solid:.54,docked:false};
+export const DEFAULT_LAYOUT:LayoutState={
+  version:1,main:.56,solid:.54,docked:false,tileMode:"split",
+  tileOrder:["sketch","properties","solid"],dockX:.5
+};
+const TILE_IDS:TileId[]=["sketch","solid","properties"];
 const finite=(n:unknown):n is number=>typeof n==="number"&&Number.isFinite(n);
+export function validTileOrder(items:unknown):items is [TileId,TileId,TileId]{
+  return Array.isArray(items)&&items.length===3&&
+    TILE_IDS.every(id=>items.includes(id))&&new Set(items).size===3;
+}
 export function clampSplit(desired:number,extent:number,minimumFirst:number,minimumSecond:number):number{
   if(!Number.isFinite(extent)||extent<=0||!Number.isFinite(desired))
     return .5;
@@ -20,33 +35,35 @@ export function validateLayout(input:unknown):LayoutState{
     typeof value.docked!=="boolean"||value.main<=0||value.main>=1||
     value.solid<=0||value.solid>=1)
     throw new Error("Invalid workspace split settings");
-  return {version:1,main:value.main,solid:value.solid,docked:value.docked};
+  const tileMode=value.tileMode===undefined?"split":value.tileMode;
+  const tileOrder=value.tileOrder===undefined?DEFAULT_LAYOUT.tileOrder:value.tileOrder;
+  const dockX=value.dockX===undefined?DEFAULT_LAYOUT.dockX:value.dockX;
+  if((tileMode!=="split"&&tileMode!=="columns")||!validTileOrder(tileOrder)||
+    !finite(dockX)||dockX<0||dockX>1)
+    throw new Error("Invalid workspace panel arrangement");
+  return {version:1,main:value.main,solid:value.solid,
+    docked:value.docked,tileMode,tileOrder:[...tileOrder],dockX};
 }
 export function loadLayout():LayoutState{
   try{
     const data=localStorage.getItem(LAYOUT_KEY);
-    return data?validateLayout(JSON.parse(data)):{...DEFAULT_LAYOUT};
-  }catch{return {...DEFAULT_LAYOUT};}
+    return data?validateLayout(JSON.parse(data)):{...DEFAULT_LAYOUT,tileOrder:[...DEFAULT_LAYOUT.tileOrder]};
+  }catch{return {...DEFAULT_LAYOUT,tileOrder:[...DEFAULT_LAYOUT.tileOrder]};}
 }
 export function saveLayout(layout:LayoutState):void{
   try{localStorage.setItem(LAYOUT_KEY,JSON.stringify(validateLayout(layout)));}
-  catch{/* Local storage may be disabled; layout remains usable for this session. */}
+  catch{/* Settings remain usable for this browser session. */}
 }
-/** A pointer/keyboard-accessible separator can resize both desktop columns
- * and the equivalent stacked-mobile rows; CSS grid and ResizeObserver perform
- * downstream canvas resizing without recreating camera or sketch state.
- */
 export class WorkspaceLayoutController{
   private state:LayoutState;
-  private readonly outer:HTMLElement;
-  private readonly side:HTMLElement;
-  private readonly mainDivider:HTMLElement;
-  private readonly sideDivider:HTMLElement;
   constructor(
-    outer:HTMLElement,side:HTMLElement,mainDivider:HTMLElement,sideDivider:HTMLElement,
-    private readonly dockChange:(docked:boolean)=>void
+    private readonly outer:HTMLElement,
+    private readonly side:HTMLElement,
+    private readonly mainDivider:HTMLElement,
+    private readonly sideDivider:HTMLElement,
+    private readonly dockChange:(docked:boolean)=>void,
+    private readonly onLayoutChange:()=>void=()=>{}
   ){
-    this.outer=outer;this.side=side;this.mainDivider=mainDivider;this.sideDivider=sideDivider;
     this.state=loadLayout();
     this.attach(mainDivider,"main");
     this.attach(sideDivider,"solid");
@@ -55,31 +72,74 @@ export class WorkspaceLayoutController{
     window.addEventListener("resize",()=>this.apply());
   }
   get docked():boolean{return this.state.docked;}
+  get dockX():number{return this.state.dockX;}
+  get tileMode():TileMode{return this.state.tileMode;}
+  get tileOrder():[TileId,TileId,TileId]{return [...this.state.tileOrder];}
   setDocked(docked:boolean):void{
     if(this.state.docked===docked)return;
-    this.state={...this.state,docked};
-    saveLayout(this.state);
+    this.commit({...this.state,docked});
     this.dockChange(docked);
     this.apply();
   }
+  setDockX(position:number):void{
+    if(!Number.isFinite(position))return;
+    this.commit({...this.state,dockX:Math.max(0,Math.min(1,position))});
+  }
+  setTileMode(mode:TileMode):void{
+    if(mode!==this.state.tileMode)this.commit({...this.state,tileMode:mode});
+  }
+  setTileOrder(order:TileId[]):void{
+    if(!validTileOrder(order))throw new Error("Invalid tile order");
+    this.commit({...this.state,tileOrder:[...order]});
+  }
+  resetArrangement():void{
+    this.commit({...this.state,tileMode:DEFAULT_LAYOUT.tileMode,
+      tileOrder:[...DEFAULT_LAYOUT.tileOrder],main:DEFAULT_LAYOUT.main,
+      solid:DEFAULT_LAYOUT.solid,dockX:DEFAULT_LAYOUT.dockX});
+  }
+  private commit(next:LayoutState):void{
+    this.state=validateLayout(next);
+    saveLayout(this.state);
+    this.apply();
+    this.onLayoutChange();
+  }
   private isStacked():boolean{return window.matchMedia("(max-width:1100px)").matches;}
+  private isThree():boolean{return this.state.tileMode==="columns"&&!this.isStacked();}
   private axes(which:"main"|"solid"):{element:HTMLElement,axis:LayoutAxis,divider:HTMLElement}{
+    if(this.isThree())return {element:this.outer,axis:"horizontal",
+      divider:which==="main"?this.mainDivider:this.sideDivider};
     return which==="main"?
       {element:this.outer,axis:this.isStacked()?"vertical":"horizontal",divider:this.mainDivider}:
       {element:this.side,axis:"vertical",divider:this.sideDivider};
   }
   private limits(which:"main"|"solid",axis:LayoutAxis):[number,number]{
+    if(this.isThree())return which==="main"?[220,380]:[180,220];
     if(which==="solid")return [155,115];
     return axis==="horizontal"?[300,300]:[230,230];
   }
   private apply():void{
+    const three=this.isThree();
+    this.outer.classList.toggle("three-tiles",three);
+    this.outer.dataset.tileMode=three?"columns":this.state.tileMode;
+    this.outer.dataset.tileOrder=this.state.tileOrder.join(",");
+    for(const [i,id] of this.state.tileOrder.entries())
+      this.outer.style.setProperty("--tile-"+id+"-col",String(i*2+1));
+    if(three){
+      const extent=Math.max(1,this.outer.clientWidth-16);
+      const first=clampSplit(this.state.main,extent,220,400);
+      const available=extent*(1-first);
+      const second=clampSplit(this.state.solid,available,180,220);
+      this.outer.style.setProperty("--three-first",String(first*100)+"%");
+      this.outer.style.setProperty("--three-second",String((1-first)*second*100)+"%");
+    }
     for(const which of ["main","solid"] as const){
       const {element,axis,divider}=this.axes(which);
       const extent=axis==="horizontal"?element.clientWidth:element.clientHeight;
       const [low,high]=this.limits(which,axis);
       const ratio=clampSplit(this.state[which],extent,low,high);
-      element.style.setProperty(which==="main"?"--main-split":"--solid-split",
-        (ratio*100).toFixed(5)+"%");
+      if(!three)
+        element.style.setProperty(which==="main"?"--main-split":"--solid-split",
+          (ratio*100).toFixed(5)+"%");
       divider.setAttribute("aria-orientation",axis==="horizontal"?"vertical":"horizontal");
       divider.setAttribute("aria-valuenow",String(Math.round(ratio*100)));
       divider.dataset.axis=axis;
@@ -90,10 +150,14 @@ export class WorkspaceLayoutController{
     const {element,axis}=this.axes(which);
     const extent=axis==="horizontal"?element.clientWidth:element.clientHeight;
     const [minFirst,minSecond]=this.limits(which,axis);
-    const clamped=clampSplit(next,extent,minFirst,minSecond);
-    this.state={...this.state,[which]:clamped};
-    this.apply();
-    saveLayout(this.state);
+    let ratio=next;
+    if(this.isThree()&&which==="solid"){
+      const available=Math.max(1,extent-16);
+      const first=clampSplit(this.state.main,available,220,400);
+      ratio=(next-first)/Math.max(.01,1-first);
+    }
+    const clamped=clampSplit(ratio,extent,minFirst,minSecond);
+    this.commit({...this.state,[which]:clamped});
   }
   private attach(divider:HTMLElement,which:"main"|"solid"):void{
     divider.addEventListener("pointerdown",event=>{
