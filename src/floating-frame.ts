@@ -26,7 +26,7 @@ export function moveResizeFloatRect(start:FloatRect,mode:FloatMode,dx:number,dy:
   let left=start.left,top=start.top,right=start.left+start.width,bottom=start.top+start.height;
   if(mode.includes("w"))left=clamp(left+dx,0,right-wMin);
   if(mode.includes("e"))right=clamp(right+dx,left+wMin,v.width);
-  if(mode.includes("n"))top=clamp(top+dy,0,bottom-hMin);
+  if(mode.includes("n"))top=clamp(top+dy,Math.min(65,Math.max(0,bottom-hMin)),bottom-hMin);
   if(mode.includes("s"))bottom=clamp(bottom+dy,top+hMin,v.height);
   return {left,top,width:right-left,height:bottom-top};
 }
