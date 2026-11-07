@@ -1,19 +1,20 @@
 /** UI-only panel geometry and ordering, independent of exact CAD state.
  *  Legacy layout v1 JSON migrates transparently to the expanded contract.
  */
+import {positionedFloatRect,normalizedFloatRect,type FloatRect} from "./floating-frame";
 export type LayoutAxis="horizontal"|"vertical";
 export type TileId="sketch"|"solid"|"properties";
 export type TileMode="split"|"columns"|"float";
 export type LayoutState={
   version:1;main:number;solid:number;docked:boolean;
   tileMode:TileMode;tileOrder:[TileId,TileId,TileId];dockX:number;
-  floatX:number;floatY:number;tiledSolidVisible:boolean;
+  floatX:number;floatY:number;floatW:number;floatH:number;tiledSolidVisible:boolean;
 };
 export const LAYOUT_KEY="flatcad.layout.v1";
 export const DEFAULT_LAYOUT:LayoutState={
   version:1,main:.56,solid:.54,docked:false,tileMode:"split",
   tileOrder:["sketch","properties","solid"],dockX:.5,floatX:.58,floatY:.17,
-  tiledSolidVisible:true
+  floatW:380,floatH:340,tiledSolidVisible:true
 };
 const TILE_IDS:TileId[]=["sketch","solid","properties"];
 const finite=(n:unknown):n is number=>typeof n==="number"&&Number.isFinite(n);
@@ -42,14 +43,17 @@ export function validateLayout(input:unknown):LayoutState{
   const dockX=value.dockX===undefined?DEFAULT_LAYOUT.dockX:value.dockX;
   const floatX=value.floatX===undefined?DEFAULT_LAYOUT.floatX:value.floatX;
   const floatY=value.floatY===undefined?DEFAULT_LAYOUT.floatY:value.floatY;
+  const floatW=value.floatW===undefined?DEFAULT_LAYOUT.floatW:value.floatW;
+  const floatH=value.floatH===undefined?DEFAULT_LAYOUT.floatH:value.floatH;
   const tiledSolidVisible=value.tiledSolidVisible===undefined?true:value.tiledSolidVisible;
   if((tileMode!=="split"&&tileMode!=="columns"&&tileMode!=="float")||!validTileOrder(tileOrder)||
     !finite(dockX)||dockX<0||dockX>1||
     !finite(floatX)||floatX<0||floatX>1||!finite(floatY)||floatY<0||floatY>1||
+    !finite(floatW)||floatW<220||floatW>3000||!finite(floatH)||floatH<180||floatH>3000||
     typeof tiledSolidVisible!=="boolean")
     throw new Error("Invalid workspace panel arrangement");
   return {version:1,main:value.main,solid:value.solid,
-    docked:value.docked,tileMode,tileOrder:[...tileOrder],dockX,floatX,floatY,tiledSolidVisible};
+    docked:value.docked,tileMode,tileOrder:[...tileOrder],dockX,floatX,floatY,floatW,floatH,tiledSolidVisible};
 }
 export function loadLayout():LayoutState{
   try{
@@ -87,6 +91,19 @@ export class WorkspaceLayoutController{
       this.commit({...this.state,tiledSolidVisible:visible});
   }
   get floatingPosition():{x:number;y:number}{return {x:this.state.floatX,y:this.state.floatY};}
+  get floatingRect():FloatRect{
+    return positionedFloatRect(this.state.floatX,this.state.floatY,
+      this.state.floatW,this.state.floatH,{width:innerWidth,height:innerHeight});
+  }
+  updateFloatingRect(rect:FloatRect):void{
+    const pos=normalizedFloatRect(rect,{width:innerWidth,height:innerHeight});
+    this.state=validateLayout({...this.state,floatX:pos.x,floatY:pos.y,
+      floatW:rect.width,floatH:rect.height});
+  }
+  persistFloatingRect():void{
+    saveLayout(this.state);
+    this.onLayoutChange();
+  }
   get tileOrder():[TileId,TileId,TileId]{return [...this.state.tileOrder];}
   setDocked(docked:boolean):void{
     if(this.state.docked===docked)return;
@@ -115,7 +132,8 @@ export class WorkspaceLayoutController{
     this.commit({...this.state,tileMode:DEFAULT_LAYOUT.tileMode,
       tileOrder:[...DEFAULT_LAYOUT.tileOrder],main:DEFAULT_LAYOUT.main,
       solid:DEFAULT_LAYOUT.solid,dockX:DEFAULT_LAYOUT.dockX,
-      floatX:DEFAULT_LAYOUT.floatX,floatY:DEFAULT_LAYOUT.floatY});
+      floatX:DEFAULT_LAYOUT.floatX,floatY:DEFAULT_LAYOUT.floatY,
+      floatW:DEFAULT_LAYOUT.floatW,floatH:DEFAULT_LAYOUT.floatH});
   }
   private commit(next:LayoutState):void{
     this.state=validateLayout(next);
