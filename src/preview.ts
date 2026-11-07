@@ -34,6 +34,7 @@ export class Preview {
   private onFacePicked: ((z: number | null) => void) | null = null;
   private pointerDown: {x:number,y:number,button:number,action:string} | null = null;
   private animationId = 0;
+  private historyInspection=false;
   private resizeTimer:ReturnType<typeof setTimeout>|undefined;
   private bufferWidth=0;
   private bufferHeight=0;
@@ -161,6 +162,10 @@ export class Preview {
     this.orbit.mouseButtons.RIGHT=this.toMouseAction(dragAction(preset,2,{shift:false,ctrl:false}));
   }
   setFacePickHandler(handler:((z:number|null)=>void)|null):void{this.onFacePicked=handler;}
+  setHistoryInspection(enabled:boolean):void{
+    this.historyInspection=enabled;
+    this.clearHighlight();
+  }
   setSurfaceHoverHandler(handler:((target:SurfaceTarget|null,pointer:{x:number,y:number})=>void)|null):void{
     this.onSurfaceHover=handler;
   }
@@ -195,6 +200,7 @@ export class Preview {
   private pickTarget(event:PointerEvent):{
     target:SurfaceTarget,faceIndex:number,normal:THREE.Vector3,point:THREE.Vector3
   }|null{
+    if(this.historyInspection)return null;
     const pick=this.committedPickMesh;
     if(!pick)return null;
     const bounds=this.renderer.domElement.getBoundingClientRect();

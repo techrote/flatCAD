@@ -295,7 +295,7 @@
 }
 @media(orientation:landscape) and (min-width:780px) and (max-width:1100px){
   .workbench .workbench-layout{
-    grid-template-rows:minmax(125px,calc((100% - 142px)*var(--main-split-num, .54))) 8px
+    grid-template-rows:minmax(125px,var(--main-split,54%)) 8px
       minmax(125px,1fr) 134px
   }
   .workbench .workbench-sketch{grid-row:1}
@@ -305,8 +305,8 @@
 }
 @media(min-width:1101px){
   .workbench .workbench-layout.three-tiles{
-    grid-template-columns:minmax(0,calc((100% - 16px)*var(--three-first,40%)))
-      8px minmax(0,calc((100% - 16px)*var(--three-second,25%)))
+    grid-template-columns:minmax(0,var(--three-first,40%))
+      8px minmax(0,var(--three-second,25%))
       8px minmax(0,1fr);
     grid-template-rows:minmax(0,1fr) 134px;
   }

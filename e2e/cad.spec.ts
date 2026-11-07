@@ -713,8 +713,8 @@ test("Solid camera orientation/zoom and old mesh stay stable across preview and 
 test("Feature history has operation/sketch names and actual per-feature B-rep thumbnails with red cuts",async({page})=>{
   await page.goto("/");
   await expect(page.locator("#status")).toContainText("Exact solid generated");
-  const history=page.locator("#history-details");
-  await history.locator("summary").click();
+  const history=page.locator("#history-timeline");
+  await expect(history).toBeVisible();
   await expect(history.locator(".history-feature-card")).toHaveCount(3);
   await expect(history.locator('.history-feature-card[data-thumbnail-state="ready"]'))
     .toHaveCount(3,{timeout:120000});
@@ -899,8 +899,8 @@ test("sketch tool rail docks in titlebar, keeps drawing interactions and remembe
 test("feature history uses newest-first compact tiles; only selected tile shows controls",async({page})=>{
   await page.goto("/");
   await expect(page.locator("#status")).toContainText("Exact solid generated");
-  await page.locator("#history-details summary").click();
-  const history=page.locator("#history-details");
+  const history=page.locator("#history-timeline");
+  await expect(history).toBeVisible();
   const tiles=history.locator(".history-tile");
   await expect(tiles).toHaveCount(3);
   await expect(history.locator(".history-tile[data-thumbnail-state='ready']"))
@@ -921,4 +921,60 @@ test("feature history uses newest-first compact tiles; only selected tile shows 
   await history.getByRole("button",{name:"Close feature controls"}).click();
   await expect(history.locator("#history-feature-editor")).toBeHidden();
   await expect(history.locator(".history-tiles canvas[data-cut-overlay='true']")).toHaveCount(2);
+});
+
+test("landscape timeline inspects an exact historical solid without altering the model",async({page})=>{
+  await page.setViewportSize({width:1440,height:820});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const timeline=page.locator("#history-timeline");
+  await expect(timeline).toBeVisible();
+  const tiles=timeline.locator(".history-tile");
+  await expect(tiles).toHaveCount(3);
+  await expect(timeline.locator('[data-thumbnail-state="ready"]'))
+    .toHaveCount(3,{timeout:120000});
+  const original=Number(await page.locator("#solid-volume").getAttribute("data-volume-mm3"));
+  await tiles.nth(2).click();
+  await expect(page.locator("#preview")).toHaveAttribute("data-history-feature-count","1");
+  const initialVolume=Number(await page.locator("#solid-volume").getAttribute("data-volume-mm3"));
+  expect(initialVolume).toBeCloseTo(48000,4);
+  expect(initialVolume).toBeGreaterThan(original);
+  const native=await page.evaluate(()=>localStorage.getItem("flatcad.project.v1"));
+  await page.locator("#timeline-now").click();
+  await expect(page.locator("#preview")).not.toHaveAttribute("data-history-feature-id",/./);
+  expect(Number(await page.locator("#solid-volume").getAttribute("data-volume-mm3")))
+    .toBeCloseTo(original,4);
+  expect(await page.evaluate(()=>localStorage.getItem("flatcad.project.v1"))).toBe(native);
+});
+
+test("sketch typography settings migrate and apply to canvas text",async({page})=>{
+  await page.goto("/");
+  await openMenu(page,"settings","dialog.text");
+  await page.locator("#sketch-font-family").selectOption("Verdana, sans-serif");
+  await page.locator("#sketch-font-size").fill("19");
+  await page.locator("#sketch-font-size").press("Tab");
+  await page.locator("#sketch-font-weight").selectOption("700");
+  await page.locator('[data-close="text-dialog"]').last().click();
+  await expect(page.locator("#sketch")).toHaveAttribute("data-sketch-text-font",/700 19px Verdana/);
+  const stored=await page.evaluate(()=>JSON.parse(localStorage.getItem("flatcad.preferences.v1")!));
+  expect(stored.sketchText).toEqual({fontFamily:"Verdana, sans-serif",sizePx:19,weight:700});
+  await page.reload();
+  await expect(page.locator("#sketch")).toHaveAttribute("data-sketch-text-font",/700 19px Verdana/);
+});
+
+test("three-column layout reorders Properties between Sketch and Solid",async({page})=>{
+  await page.setViewportSize({width:1500,height:850});
+  await page.goto("/");
+  await openMenu(page,"settings","dialog.layout");
+  await page.locator("#tile-mode").selectOption("columns");
+  await expect(page.locator("#workbench-layout")).toHaveClass(/three-tiles/);
+  const x=async(sel:string)=>(await page.locator(sel).boundingBox())!.x;
+  expect(await x(".workbench-sketch")).toBeLessThan(await x(".inspector-drawer"));
+  expect(await x(".inspector-drawer")).toBeLessThan(await x(".preview-panel"));
+  await page.locator("#tile-order .tile-order-row").first().getByTitle("Move right").click();
+  expect(await x(".inspector-drawer")).toBeLessThan(await x(".workbench-sketch"));
+  await page.locator('[data-close="layout-dialog"]').last().click();
+  await page.reload();
+  await expect(page.locator("#workbench-layout")).toHaveClass(/three-tiles/);
+  expect(await x(".inspector-drawer")).toBeLessThan(await x(".workbench-sketch"));
 });

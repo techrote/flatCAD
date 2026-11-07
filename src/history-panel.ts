@@ -19,7 +19,22 @@ export class FeatureHistoryPanel {
     private readonly host:HTMLElement,
     private readonly onUpdate:(feature:Feature)=>void,
     private readonly onDelete:(feature:Feature)=>void,
+    private readonly onInspect:(id:string|null,frame:KernelHistoryFrame|null)=>void=()=>{},
   ){}
+  /** Clear historical inspection without mutating the editable CAD feature list. */
+  clearSelection():void{
+    this.activeFeatureId=null;
+    for(const button of this.buttons.values()){
+      button.dataset.selected="false";
+      button.setAttribute("aria-pressed","false");
+    }
+    if(this.editor)this.editor.hidden=true;
+    this.onInspect(null,null);
+  }
+  private inspect():void{
+    const id=this.activeFeatureId;
+    this.onInspect(id,id?this.lastFrames?.find(f=>f.featureId===id)??null:null);
+  }
 
   render(doc:CadDocument,frames:KernelHistoryFrame[]|null):void{
     if(this.lastDocument===doc&&this.lastFrames===frames)return;
@@ -95,7 +110,10 @@ export class FeatureHistoryPanel {
       grid.append(card);
     }
     this.host.append(grid);
-    if(this.activeFeatureId)this.showEditor(this.activeFeatureId);
+    if(this.activeFeatureId){
+      this.showEditor(this.activeFeatureId);
+      this.inspect();
+    }
     // Avoid jumping the drawer back to the beginning when only B-rep
     // thumbnail frames finish rendering.
     this.host.scrollTop=oldScroll;
@@ -110,9 +128,11 @@ export class FeatureHistoryPanel {
     }
     if(!this.activeFeatureId){
       if(this.editor)this.editor.hidden=true;
+      this.inspect();
       return;
     }
     this.showEditor(this.activeFeatureId);
+    this.inspect();
   }
 
   private showEditor(id:string):void{

@@ -482,6 +482,7 @@ export class SketchCanvas {
     return weight+" "+sizePx+"px "+fontFamily;
   }
   draw():void {
+    this.canvas.dataset.sketchTextFont=this.sketchFont();
     this.canvas.dataset.viewPanX=String(this.panX);
     this.canvas.dataset.viewPanY=String(this.panY);
     const ctx=this.ctx;

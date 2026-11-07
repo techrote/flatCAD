@@ -213,8 +213,42 @@ const historyPanel=new FeatureHistoryPanel(
   feature=>safe(()=>updateFeature(feature)),
   feature=>safe(()=>change(validateDocument({
     ...doc,features:doc.features.filter(f=>f.id!==feature.id)
-  })))
+  }))),
+  (id,frame)=>inspectFeatureHistory(id,frame)
 );
+/** History inspection is a viewport state, not an undoable document edit.
+ *  When frames are loading we retain the current solid until an exact B-rep
+ *  snapshot is available; clicking Now restores the authoritative tip.
+ */
+function inspectFeatureHistory(id:string|null,frame:KernelHistoryFrame|null):void{
+  const host=byId("preview");
+  if(!id){
+    delete host.dataset.historyFeatureId;
+    delete host.dataset.historyFeatureCount;
+    preview?.setHistoryInspection(false);
+    byId("timeline-indicator").textContent="Current solid";
+    if(committedBuild)preview?.setMesh(
+      withoutCylinderSeams(committedBuild.mesh,doc),{preserveCamera:true});
+    setVolume(committedBuild?.statistics?.volumeMm3??null);
+    return;
+  }
+  if(!frame){
+    byId("timeline-indicator").textContent="Preparing historical solid…";
+    ensureHistoryThumbnails();
+    return;
+  }
+  if(extrudeTargets.length)closeExtrude();
+  preview?.setMesh(withoutCylinderSeams(frame.mesh,doc),{preserveCamera:true});
+  preview?.setHistoryInspection(true);
+  const index=doc.features.findIndex(f=>f.id===id);
+  byId("timeline-indicator").textContent="After feature "+(index+1)+" of "+doc.features.length;
+  host.dataset.historyFeatureId=id;
+  host.dataset.historyFeatureCount=String(index+1);
+  setVolume(frame.statistics.volumeMm3);
+  byId("solid-volume").dataset.mode="history";
+  byId("solid-volume").textContent="History · "+
+    frame.statistics.volumeMm3.toLocaleString("en-GB",{maximumFractionDigits:2,minimumFractionDigits:2})+" mm³";
+}
 const canvas=new SketchCanvas(inputCanvas(),doc,prefs,{
   onCreate:p=>safe(()=>{selectedId=p.id;selectedIds=[p.id];change(appendProfile(doc,p));setTool("select");}),
   onCreateMany:profiles=>safe(()=>{
@@ -337,6 +371,7 @@ function persistPreferences():void{
   }catch(error){status("Settings invalid: "+String(error),true);}
 }
 function change(next:CadDocument):void{
+  historyPanel.clearSelection();
   doc=validateDocument(next);
   history=[...history.slice(0,historyIndex+1),doc].slice(-100);
   historyIndex=history.length-1;
@@ -344,6 +379,7 @@ function change(next:CadDocument):void{
 }
 function undoRedo(next:number):void{
   if(next<0||next>=history.length)return;
+  historyPanel.clearSelection();
   historyIndex=next;doc=history[next];persistDocument();render();rebuild();
 }
 function setTool(tool:SketchTool):void{
@@ -539,7 +575,8 @@ function rebuild():void {
       if(extrudeTargets.length&&input("extrude-preview").checked){
         preview?.setCommittedPickMesh(result.mesh);
         scheduleOperationPreview();
-      }else preview?.setMesh(withoutCylinderSeams(result.mesh,snapshot));
+      }else if(!byId("preview").dataset.historyFeatureId)
+        preview?.setMesh(withoutCylinderSeams(result.mesh,snapshot));
       byId("preview").dataset.buildState="ready";
       if(byId<HTMLDetailsElement>("history-details").open)
         ensureHistoryThumbnails();
@@ -597,6 +634,7 @@ function textNode(text:string):HTMLElement{
 }
 function restoreCommittedPreview():void {
   const host=byId("preview");
+  if(host.dataset.historyFeatureId)return;
   delete host.dataset.cutToolVolumeMm3;
   delete host.dataset.cutRemovedVolumeMm3;
   delete host.dataset.cutToolBoundsMm;
@@ -885,6 +923,7 @@ function openExtrude(id?:string,operation?:"add"|"cut",at?:Point2):void {
     setTool("extrude");status("Click a closed shape to extrude or cut");
     return;
   }
+  historyPanel.clearSelection();
   const targets=selectedProfiles(doc,ids);
   if(targets.length!==ids.length||targets.some(p=>!isClosed(p))){
     status("Only closed, valid sketch profiles can be extruded. Close any open lines first.",true);
@@ -953,6 +992,7 @@ function newProject():void {
 async function openProject(file:File):Promise<void>{
   if(file.size>2_000_000)throw new Error("Project exceeds 2 MB");
   const loaded=validateDocument(JSON.parse(await file.text()));
+  historyPanel.clearSelection();
   doc=loaded;history=[doc];historyIndex=0;selectedId=null;lastSurfaceZ=null;
   persistDocument();closeExtrude();render();rebuild();
   status("Project loaded · "+doc.profiles.length+" profiles");
