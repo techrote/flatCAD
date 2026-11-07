@@ -21,3 +21,24 @@ describe("persistable workspace panel layout",()=>{
     expect(()=>validateLayout({version:1,main:.5,solid:1.5,docked:false})).toThrow();
   });
 });
+
+describe("rearrangeable UI tiles and legacy layout migration",()=>{
+  it("migrates old split-only persisted values without changing native geometry",()=>{
+    const legacy={version:1,main:.6,solid:.52,docked:false};
+    const out=validateLayout(legacy);
+    expect(out.tileMode).toBe("split");
+    expect(out.tileOrder).toEqual(["sketch","properties","solid"]);
+    expect(out.dockX).toBe(.5);
+  });
+  it("accepts center Properties panel and alternative tile orders",()=>{
+    const out=validateLayout({...DEFAULT_LAYOUT,tileMode:"columns",
+      tileOrder:["solid","properties","sketch"],dockX:.85});
+    expect(out.tileMode).toBe("columns");
+    expect(out.tileOrder[1]).toBe("properties");
+  });
+  it("refuses duplicate tiles and invalid anchor position",()=>{
+    expect(()=>validateLayout({...DEFAULT_LAYOUT,
+      tileOrder:["sketch","sketch","solid"]})).toThrow("arrangement");
+    expect(()=>validateLayout({...DEFAULT_LAYOUT,dockX:2})).toThrow("arrangement");
+  });
+});

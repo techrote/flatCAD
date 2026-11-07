@@ -11,6 +11,7 @@ export class FeatureHistoryPanel {
   private lastDocument:CadDocument|null=null;
   private lastFrames:KernelHistoryFrame[]|null=null;
   private currentDocument:CadDocument|null=null;
+  private lastTimeline=false;
   private activeFeatureId:string|null=null;
   private readonly buttons=new Map<string,HTMLButtonElement>();
   private editor:HTMLElement|null=null;
@@ -19,10 +20,28 @@ export class FeatureHistoryPanel {
     private readonly host:HTMLElement,
     private readonly onUpdate:(feature:Feature)=>void,
     private readonly onDelete:(feature:Feature)=>void,
+    private readonly onInspect:(id:string|null,frame:KernelHistoryFrame|null)=>void=()=>{},
   ){}
+  /** Clear historical inspection without mutating the editable CAD feature list. */
+  clearSelection():void{
+    this.activeFeatureId=null;
+    for(const button of this.buttons.values()){
+      button.dataset.selected="false";
+      button.setAttribute("aria-pressed","false");
+    }
+    if(this.editor)this.editor.hidden=true;
+    this.onInspect(null,null);
+  }
+  private inspect():void{
+    const id=this.activeFeatureId;
+    this.onInspect(id,id?this.lastFrames?.find(f=>f.featureId===id)??null:null);
+  }
 
   render(doc:CadDocument,frames:KernelHistoryFrame[]|null):void{
-    if(this.lastDocument===doc&&this.lastFrames===frames)return;
+    const timeline=Boolean(this.host.closest("#history-timeline"));
+    if(this.lastDocument===doc&&this.lastFrames===frames&&
+      this.lastTimeline===timeline)return;
+    this.lastTimeline=timeline;
     this.lastDocument=doc;
     this.lastFrames=frames;
     this.currentDocument=doc;
@@ -47,10 +66,12 @@ export class FeatureHistoryPanel {
     this.host.append(editor);
     const grid=document.createElement("div");
     grid.className="history-tiles";
-    grid.setAttribute("aria-label","Feature history, newest first");
-    // The B-rep was evaluated from oldest to newest; display order does not
-    // mutate doc.features or the stable feature IDs.
-    for(const feature of [...doc.features].reverse()){
+    grid.setAttribute("aria-label",timeline?
+      "Feature timeline, oldest first":"Feature history, newest first");
+    // Horizontal timelines run oldest → newest towards the "Now" endpoint.
+    // The compact portrait history drawer retains newest-first. Neither view
+    // mutates the authoritative document's oldest-first evaluation sequence.
+    for(const feature of (timeline?doc.features:[...doc.features].reverse())){
       const name=featureLabel(doc,feature);
       const card=document.createElement("button");
       card.type="button";
@@ -95,7 +116,10 @@ export class FeatureHistoryPanel {
       grid.append(card);
     }
     this.host.append(grid);
-    if(this.activeFeatureId)this.showEditor(this.activeFeatureId);
+    if(this.activeFeatureId){
+      this.showEditor(this.activeFeatureId);
+      this.inspect();
+    }
     // Avoid jumping the drawer back to the beginning when only B-rep
     // thumbnail frames finish rendering.
     this.host.scrollTop=oldScroll;
@@ -110,9 +134,11 @@ export class FeatureHistoryPanel {
     }
     if(!this.activeFeatureId){
       if(this.editor)this.editor.hidden=true;
+      this.inspect();
       return;
     }
     this.showEditor(this.activeFeatureId);
+    this.inspect();
   }
 
   private showEditor(id:string):void{

@@ -713,20 +713,20 @@ test("Solid camera orientation/zoom and old mesh stay stable across preview and 
 test("Feature history has operation/sketch names and actual per-feature B-rep thumbnails with red cuts",async({page})=>{
   await page.goto("/");
   await expect(page.locator("#status")).toContainText("Exact solid generated");
-  const history=page.locator("#history-details");
-  await history.locator("summary").click();
+  const history=page.locator("#history-timeline");
+  await expect(history).toBeVisible();
   await expect(history.locator(".history-feature-card")).toHaveCount(3);
   await expect(history.locator('.history-feature-card[data-thumbnail-state="ready"]'))
     .toHaveCount(3,{timeout:120000});
   const names=await history.locator(".history-feature-name").allTextContents();
-  expect(names).toEqual(["Cut · Circle 2","Cut · Circle 1","Extrude · Rectangle 1"]);
+  expect(names).toEqual(["Extrude · Rectangle 1","Cut · Circle 1","Cut · Circle 2"]);
   const thumbs=history.locator("canvas.history-thumbnail");
   await expect(thumbs).toHaveCount(3);
-  await expect(thumbs.nth(0)).toHaveAttribute("data-cut-overlay","true");
+  await expect(thumbs.nth(0)).toHaveAttribute("data-cut-overlay","false");
   await expect(thumbs.nth(1)).toHaveAttribute("data-cut-overlay","true");
-  await expect(thumbs.nth(2)).toHaveAttribute("data-cut-overlay","false");
-  const result=Number(await thumbs.nth(0).getAttribute("data-result-volume-mm3"));
-  const tool=Number(await thumbs.nth(0).getAttribute("data-tool-volume-mm3"));
+  await expect(thumbs.nth(2)).toHaveAttribute("data-cut-overlay","true");
+  const result=Number(await thumbs.nth(2).getAttribute("data-result-volume-mm3"));
+  const tool=Number(await thumbs.nth(2).getAttribute("data-tool-volume-mm3"));
   expect(result).toBeGreaterThan(0);
   expect(tool).toBeGreaterThan(0);
   const pixels=await thumbs.nth(1).evaluate((canvas:HTMLCanvasElement)=>{
@@ -854,7 +854,7 @@ test("resizing both dividers changes panels without touching CAD data and persis
 });
 
 test("stacked viewport still offers pointer-resizable horizontal Sketch/Solid divider",async({page})=>{
-  await page.setViewportSize({width:900,height:850});
+  await page.setViewportSize({width:760,height:850});
   await page.goto("/");
   const main=page.locator("#main-resizer");
   await expect(main).toHaveAttribute("aria-orientation","horizontal");
@@ -896,17 +896,17 @@ test("sketch tool rail docks in titlebar, keeps drawing interactions and remembe
     .toBe(false);
 });
 
-test("feature history uses newest-first compact tiles; only selected tile shows controls",async({page})=>{
+test("landscape timeline runs oldest first; only selected tile shows controls",async({page})=>{
   await page.goto("/");
   await expect(page.locator("#status")).toContainText("Exact solid generated");
-  await page.locator("#history-details summary").click();
-  const history=page.locator("#history-details");
+  const history=page.locator("#history-timeline");
+  await expect(history).toBeVisible();
   const tiles=history.locator(".history-tile");
   await expect(tiles).toHaveCount(3);
   await expect(history.locator(".history-tile[data-thumbnail-state='ready']"))
     .toHaveCount(3,{timeout:120000});
   const names=await tiles.locator(".history-feature-name").allTextContents();
-  expect(names).toEqual(["Cut · Circle 2","Cut · Circle 1","Extrude · Rectangle 1"]);
+  expect(names).toEqual(["Extrude · Rectangle 1","Cut · Circle 1","Cut · Circle 2"]);
   await expect(history.locator("#history-feature-editor")).toBeHidden();
   await expect(history.locator(".history-tiles input")).toHaveCount(0);
   await expect(history.locator(".history-tiles select")).toHaveCount(0);
@@ -921,4 +921,107 @@ test("feature history uses newest-first compact tiles; only selected tile shows 
   await history.getByRole("button",{name:"Close feature controls"}).click();
   await expect(history.locator("#history-feature-editor")).toBeHidden();
   await expect(history.locator(".history-tiles canvas[data-cut-overlay='true']")).toHaveCount(2);
+});
+
+test("landscape timeline inspects an exact historical solid without altering the model",async({page})=>{
+  await page.setViewportSize({width:1440,height:820});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const timeline=page.locator("#history-timeline");
+  await expect(timeline).toBeVisible();
+  const tiles=timeline.locator(".history-tile");
+  await expect(tiles).toHaveCount(3);
+  await expect(timeline.locator('[data-thumbnail-state="ready"]'))
+    .toHaveCount(3,{timeout:120000});
+  const original=Number(await page.locator("#solid-volume").getAttribute("data-volume-mm3"));
+  await tiles.first().click();
+  await expect(page.locator("#preview")).toHaveAttribute("data-history-feature-count","1");
+  const initialVolume=Number(await page.locator("#solid-volume").getAttribute("data-volume-mm3"));
+  expect(initialVolume).toBeCloseTo(48000,4);
+  expect(initialVolume).toBeGreaterThan(original);
+  const native=await page.evaluate(()=>localStorage.getItem("flatcad.project.v1"));
+  await page.locator("#timeline-now").click();
+  await expect(page.locator("#preview")).not.toHaveAttribute("data-history-feature-id",/./);
+  expect(Number(await page.locator("#solid-volume").getAttribute("data-volume-mm3")))
+    .toBeCloseTo(original,4);
+  expect(await page.evaluate(()=>localStorage.getItem("flatcad.project.v1"))).toBe(native);
+});
+
+test("sketch typography settings migrate and apply to canvas text",async({page})=>{
+  await page.goto("/");
+  await openMenu(page,"settings","dialog.text");
+  await page.locator("#sketch-font-family").selectOption("Verdana, sans-serif");
+  await page.locator("#sketch-font-size").fill("19");
+  await page.locator("#sketch-font-size").press("Tab");
+  await page.locator("#sketch-font-weight").selectOption("700");
+  await page.locator('[data-close="text-dialog"]').last().click();
+  await expect(page.locator("#sketch")).toHaveAttribute("data-sketch-text-font",/700 19px Verdana/);
+  const stored=await page.evaluate(()=>JSON.parse(localStorage.getItem("flatcad.preferences.v1")!));
+  expect(stored.sketchText).toEqual({fontFamily:"Verdana, sans-serif",sizePx:19,weight:700});
+  await page.reload();
+  await expect(page.locator("#sketch")).toHaveAttribute("data-sketch-text-font",/700 19px Verdana/);
+});
+
+test("three-column layout reorders Properties between Sketch and Solid",async({page})=>{
+  await page.setViewportSize({width:1500,height:850});
+  await page.goto("/");
+  await openMenu(page,"settings","dialog.layout");
+  await page.locator("#tile-mode").selectOption("columns");
+  await expect(page.locator("#workbench-layout")).toHaveClass(/three-tiles/);
+  const x=async(sel:string)=>(await page.locator(sel).boundingBox())!.x;
+  expect(await x(".workbench-sketch")).toBeLessThan(await x(".inspector-drawer"));
+  expect(await x(".inspector-drawer")).toBeLessThan(await x(".preview-panel"));
+  await page.locator("#tile-order .tile-order-row").first().getByTitle("Move right").click();
+  expect(await x(".inspector-drawer")).toBeLessThan(await x(".workbench-sketch"));
+  await page.locator('[data-close="layout-dialog"]').last().click();
+  await page.reload();
+  await expect(page.locator("#workbench-layout")).toHaveClass(/three-tiles/);
+  expect(await x(".inspector-drawer")).toBeLessThan(await x(".workbench-sketch"));
+});
+
+test("landscape layout keeps Sketch and Solid side by side above full-width timeline",async({page})=>{
+  await page.setViewportSize({width:900,height:650});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const sketch=(await page.locator(".workbench-sketch").boundingBox())!;
+  const solid=(await page.locator(".preview-panel").boundingBox())!;
+  const timeline=(await page.locator("#history-timeline").boundingBox())!;
+  expect(solid.x).toBeGreaterThan(sketch.x+sketch.width);
+  expect(timeline.y).toBeGreaterThan(sketch.y+sketch.height-4);
+  expect(timeline.width).toBeGreaterThan(830);
+  expect(timeline.y+timeline.height).toBeLessThanOrEqual(650);
+  await expect(page.locator("#main-resizer")).toHaveAttribute("aria-orientation","vertical");
+  await expect(page.locator("#preview canvas")).toBeVisible();
+  await expect(page.locator("#preview")).toHaveAttribute("data-rendered-solid","true");
+  const original=await page.locator("#preview").getAttribute("data-camera-direction");
+  const resize=page.locator("#main-resizer"),r=(await resize.boundingBox())!;
+  await page.mouse.move(r.x+r.width/2,r.y+r.height/2);
+  await page.mouse.down();
+  await page.mouse.move(r.x+r.width/2+50,r.y+r.height/2,{steps:6});
+  await page.mouse.up();
+  await expect(page.locator("#preview")).toHaveAttribute("data-rendered-solid","true");
+  expect(await page.locator("#preview").getAttribute("data-camera-direction")).toBe(original);
+});
+
+test("portrait history retains newest-first even after switching out of timeline mode",async({page})=>{
+  await page.setViewportSize({width:760,height:850});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const portrait=page.locator("#history-details");
+  await portrait.locator("summary").click();
+  await expect(portrait.locator(".history-tile")).toHaveCount(3);
+  expect(await portrait.locator(".history-feature-name").allTextContents())
+    .toEqual(["Cut · Circle 2","Cut · Circle 1","Extrude · Rectangle 1"]);
+  await page.setViewportSize({width:1280,height:720});
+  const timeline=page.locator("#history-timeline");
+  await expect(timeline).toBeVisible();
+  expect(await timeline.locator(".history-feature-name").allTextContents())
+    .toEqual(["Extrude · Rectangle 1","Cut · Circle 1","Cut · Circle 2"]);
+  await page.setViewportSize({width:760,height:850});
+  await expect(portrait).toBeVisible();
+  // Media-query visibility may update before the asynchronous resize event
+  // moves the same history list back from the landscape timeline container.
+  await expect(portrait.locator(".history-feature-name")).toHaveCount(3);
+  expect(await portrait.locator(".history-feature-name").allTextContents())
+    .toEqual(["Cut · Circle 2","Cut · Circle 1","Extrude · Rectangle 1"]);
 });

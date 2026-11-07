@@ -417,7 +417,7 @@ export class SketchCanvas {
         :p.kind==="circle"?"Ø "+fmt(2*p.radius)
         :p.kind==="polygon"?p.sides+" sides · R"+fmt(p.radius)
         :"Slot · R"+fmt(p.radius);
-      ctx.font="11px ui-monospace, monospace";ctx.textAlign="center";
+      ctx.font=this.sketchFont();ctx.textAlign="center";
       ctx.fillStyle=selected?"#ffd6a2":"#bddaf5";ctx.fillText(label,c.x,c.y+4);
     }
   }
@@ -427,7 +427,7 @@ export class SketchCanvas {
     if(p&&outline(p).every(pt=>Number.isFinite(pt.x)&&Number.isFinite(pt.y)))
       this.paintShape(p,false,false,true);
     const screen=this.toScreen(g.to);
-    this.ctx.font="12px ui-monospace,monospace";
+    this.ctx.font=this.sketchFont();
     this.ctx.textAlign="left";this.ctx.fillStyle="#ffc786";
     const label=p?.kind==="rectangle"
       ?fmt(p.width)+" × "+fmt(p.height)+" mm"
@@ -474,10 +474,15 @@ export class SketchCanvas {
     ctx.lineTo(end.x+4,end.y+7*direction);
     ctx.lineTo(end.x+11,end.y+10*direction);
     ctx.closePath();ctx.fill();
-    ctx.textAlign="left";ctx.fillStyle="#ffd6a1";ctx.font="12px ui-monospace,monospace";
+    ctx.textAlign="left";ctx.fillStyle="#ffd6a1";ctx.font=this.sketchFont();
     ctx.fillText("↕ "+fmt(this.extrude.depth)+" mm",end.x+16,end.y+4);
   }
+  private sketchFont():string{
+    const {weight,sizePx,fontFamily}=this.prefs.sketchText;
+    return weight+" "+sizePx+"px "+fontFamily;
+  }
   draw():void {
+    this.canvas.dataset.sketchTextFont=this.sketchFont();
     this.canvas.dataset.viewPanX=String(this.panX);
     this.canvas.dataset.viewPanY=String(this.panY);
     const ctx=this.ctx;
@@ -499,7 +504,7 @@ export class SketchCanvas {
       ctx.strokeStyle="#6bdda9";ctx.lineWidth=1.5;
       ctx.beginPath();ctx.arc(pt.x,pt.y,5,0,Math.PI*2);ctx.stroke();
     }
-    ctx.textAlign="left";ctx.fillStyle="#7490a9";ctx.font="11px ui-monospace,monospace";
+    ctx.textAlign="left";ctx.fillStyle="#7490a9";ctx.font=this.sketchFont();
     ctx.fillText("XY · "+fmt(this.zoom)+" px/mm",12,this.height-14);
   }
 }

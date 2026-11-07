@@ -34,6 +34,10 @@ export class Preview {
   private onFacePicked: ((z: number | null) => void) | null = null;
   private pointerDown: {x:number,y:number,button:number,action:string} | null = null;
   private animationId = 0;
+  private historyInspection=false;
+  private resizeTimer:ReturnType<typeof setTimeout>|undefined;
+  private bufferWidth=0;
+  private bufferHeight=0;
 
   constructor(private readonly container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -158,6 +162,10 @@ export class Preview {
     this.orbit.mouseButtons.RIGHT=this.toMouseAction(dragAction(preset,2,{shift:false,ctrl:false}));
   }
   setFacePickHandler(handler:((z:number|null)=>void)|null):void{this.onFacePicked=handler;}
+  setHistoryInspection(enabled:boolean):void{
+    this.historyInspection=enabled;
+    this.clearHighlight();
+  }
   setSurfaceHoverHandler(handler:((target:SurfaceTarget|null,pointer:{x:number,y:number})=>void)|null):void{
     this.onSurfaceHover=handler;
   }
@@ -192,6 +200,7 @@ export class Preview {
   private pickTarget(event:PointerEvent):{
     target:SurfaceTarget,faceIndex:number,normal:THREE.Vector3,point:THREE.Vector3
   }|null{
+    if(this.historyInspection)return null;
     const pick=this.committedPickMesh;
     if(!pick)return null;
     const bounds=this.renderer.domElement.getBoundingClientRect();
@@ -347,17 +356,42 @@ export class Preview {
     delete this.container.dataset.vertexSphereVisible;
   }
 
+  /** A divider drag must never present a cleared WebGL drawing buffer.
+   *  Keep the previous buffer composited at CSS size while resizing, then
+   *  allocate the new backing pixels once the drag settles. A synchronous
+   *  redraw immediately after setSize closes the clear-before-next-RAF gap.
+   *  A transient zero-sized or detached host is NOT a request to clear.
+   */
   private resize(): void {
-    const width = Math.max(1, this.container.clientWidth);
-    const height = Math.max(1, this.container.clientHeight);
-    this.renderer.setSize(width, height, false);
-    const span = 100;
-    const aspect = width / height;
-    this.camera.left = -span * aspect / 2;
-    this.camera.right = span * aspect / 2;
-    this.camera.top = span / 2;
-    this.camera.bottom = -span / 2;
+    const width=Math.round(this.container.clientWidth);
+    const height=Math.round(this.container.clientHeight);
+    if(width<2||height<2||!this.container.isConnected)return;
+    const span=100,aspect=width/height;
+    this.camera.left=-span*aspect/2;
+    this.camera.right=span*aspect/2;
+    this.camera.top=span/2;
+    this.camera.bottom=-span/2;
     this.camera.updateProjectionMatrix();
+    clearTimeout(this.resizeTimer);
+    const commit=()=>{
+      if(!this.container.isConnected||this.container.clientWidth<2||
+        this.container.clientHeight<2)return;
+      if(this.bufferWidth!==width||this.bufferHeight!==height){
+        this.renderer.setSize(width,height,false);
+        this.bufferWidth=width;
+        this.bufferHeight=height;
+        this.container.dataset.rendererResizeCount=String(
+          (Number(this.container.dataset.rendererResizeCount)||0)+1);
+      }
+      this.renderer.render(this.scene,this.camera);
+    };
+    if(this.bufferWidth===0)commit();
+    else{
+      // Keep drawing into the existing backing buffer until the pointer
+      // stops. The canvas CSS stretches it without exposing blank pixels.
+      this.renderer.render(this.scene,this.camera);
+      this.resizeTimer=setTimeout(commit,120);
+    }
   }
 
   private makeGeometry(mesh:GeometryMesh):THREE.BufferGeometry {
@@ -493,6 +527,7 @@ export class Preview {
 
   dispose(): void {
     cancelAnimationFrame(this.animationId);
+    clearTimeout(this.resizeTimer);
     this.resizeObserver.disconnect();
     this.orbit.dispose();
     this.onFacePicked=null;
