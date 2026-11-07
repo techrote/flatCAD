@@ -17,6 +17,10 @@ export class Preview {
   private readonly raycaster = new THREE.Raycaster();
   private readonly pickPoint = new THREE.Vector2();
   private object: THREE.Group | null = null;
+  private hasFramedSolid=false;
+  private topologyVertices: THREE.Vector3[] = [];
+  /** Topological vertex hover has a matching visible green sphere diameter. */
+  private readonly vertexRadiusPx=17;
   private hoveredHighlight: THREE.Mesh | null = null;
   private hoveredKey = "";
   private lastHovered: SurfaceTarget | null = null;
@@ -161,6 +165,7 @@ export class Preview {
   /** Keep the raycast mesh independent from the coloured provisional result. */
   setCommittedPickMesh(mesh:GeometryMesh|null):void {
     this.clearHighlight();
+    this.topologyVertices=[];
     if(this.committedPickMesh){
       this.committedPickMesh.geometry.dispose();
       (this.committedPickMesh.material as THREE.Material).dispose();
@@ -168,48 +173,63 @@ export class Preview {
     }
     if(!mesh||!mesh.triangles.length)return;
     const geometry=this.makeGeometry(mesh);
+    for(let i=0;i+2<(mesh.topologyVertices?.length??0);i+=3){
+      this.topologyVertices.push(new THREE.Vector3(
+        mesh.topologyVertices[i],mesh.topologyVertices[i+1],mesh.topologyVertices[i+2]));
+    }
+    this.container.dataset.topologyVertexCount=String(this.topologyVertices.length);
     this.committedPickMesh=new THREE.Mesh(geometry,new THREE.MeshBasicMaterial({side:THREE.DoubleSide}));
     this.committedPickMesh.updateMatrixWorld(true);
   }
-  /** Raycast the COMMITTED B-rep-derived surface, never the provisional tool. */
-  private pickTarget(event:PointerEvent):{target:SurfaceTarget,faceIndex:number,normal:THREE.Vector3,point:THREE.Vector3}|null {
+  /** Pick exact B-rep edge endpoints first; then the committed surface.
+   *  Never identify arbitrary tessellation triangle corners as CAD vertices. */
+  private pickTarget(event:PointerEvent):{
+    target:SurfaceTarget,faceIndex:number,normal:THREE.Vector3,point:THREE.Vector3
+  }|null{
     const pick=this.committedPickMesh;
     if(!pick)return null;
     const bounds=this.renderer.domElement.getBoundingClientRect();
     if(bounds.width<=0||bounds.height<=0)return null;
-    this.pickPoint.set(2*(event.clientX-bounds.left)/bounds.width-1,
-      1-2*(event.clientY-bounds.top)/bounds.height);
+    const px=event.clientX-bounds.left,py=event.clientY-bounds.top;
+    this.pickPoint.set(2*px/bounds.width-1,1-2*py/bounds.height);
     this.camera.updateMatrixWorld(true);
     this.raycaster.setFromCamera(this.pickPoint,this.camera);
-    const positions=pick.geometry.getAttribute("position");
     const hits=this.raycaster.intersectObject(pick,false);
+    // A 17-CSS-pixel circle is both the hover activation zone and the
+    // apparent radius of the translucent green sphere.
+    let nearest:THREE.Vector3|null=null;
+    let nearestPx=this.vertexRadiusPx;
+    for(const v of this.topologyVertices){
+      const screen=v.clone().project(this.camera);
+      if(screen.z<-1||screen.z>1)continue;
+      const sx=(screen.x+1)*bounds.width/2,sy=(1-screen.y)*bounds.height/2;
+      const d=Math.hypot(sx-px,sy-py);
+      if(d>nearestPx)continue;
+      const occluded=hits.length>0 &&
+        v.distanceTo(this.camera.position)>hits[0].distance+.03;
+      if(occluded)continue;
+      nearest=v;nearestPx=d;
+    }
+    if(nearest){
+      const z=exactFaceElevation(nearest.z,this.allowedElevations,.002)??nearest.z;
+      const target:SurfaceTarget={kind:"vertex",point:[nearest.x,nearest.y,nearest.z],
+        z,normal:[0,0,0]};
+      return {target,faceIndex:-1,normal:new THREE.Vector3(),point:nearest.clone()};
+    }
+    const positions=pick.geometry.getAttribute("position");
     for(const hit of hits){
-      if(!hit.face||hit.faceIndex==null)return null;
+      if(!hit.face||hit.faceIndex==null)continue;
       const triangle=hit.face;
       const v=[
         new THREE.Vector3().fromBufferAttribute(positions,triangle.a),
         new THREE.Vector3().fromBufferAttribute(positions,triangle.b),
         new THREE.Vector3().fromBufferAttribute(positions,triangle.c)
       ];
-      // Each mesh triangle is only a display approximation. A "face Z" is
-      // accepted ONLY if it matches a horizontal, source-authorized plane.
-      let z:number|null=null,kind:"face"|"vertex"="face";
+      // Only horizontal planar faces can supply an exact source Z.
       const flat=Math.max(...v.map(p=>p.z))-Math.min(...v.map(p=>p.z))<.002;
-      if(flat&&Math.abs(triangle.normal.z)>.995)
-        z=exactFaceElevation(v[0].z,this.allowedElevations,.002);
-      const px=event.clientX-bounds.left,py=event.clientY-bounds.top;
-      const near=v.map(vertex=>{
-        const projected=vertex.clone().project(this.camera);
-        return Math.hypot((projected.x+1)*bounds.width/2-px,
-          (1-projected.y)*bounds.height/2-py);
-      });
-      const nearIndex=near.indexOf(Math.min(...near));
-      if(near[nearIndex]<=8){
-        const vertex=v[nearIndex];
-        const exact=exactFaceElevation(vertex.z,this.allowedElevations,.002);
-        if(exact!==null){kind="vertex";z=exact;}
-      }
-      const target:SurfaceTarget={kind,
+      const z=flat&&Math.abs(triangle.normal.z)>.995
+        ?exactFaceElevation(v[0].z,this.allowedElevations,.002):null;
+      const target:SurfaceTarget={kind:"face",
         point:[hit.point.x,hit.point.y,hit.point.z],
         z,normal:[triangle.normal.x,triangle.normal.y,triangle.normal.z]};
       return {target,faceIndex:hit.faceIndex,normal:triangle.normal.clone().normalize(),
@@ -221,6 +241,37 @@ export class Preview {
    *  highlight the selected tessellated patch; exact topology is untouched. */
   private showHighlight(hit:{target:SurfaceTarget,faceIndex:number,normal:THREE.Vector3,point:THREE.Vector3}|null):void{
     if(!hit||!this.committedPickMesh){this.clearHighlight();return;}
+    if(hit.target.kind==="vertex"){
+      const v=hit.point;
+      const key="vertex:"+v.toArray().map(n=>n.toFixed(5)).join("/")+
+        "/zoom:"+this.camera.zoom.toFixed(4);
+      if(key===this.hoveredKey&&this.hoveredHighlight)return;
+      this.clearHighlight();
+      const bounds=this.renderer.domElement.getBoundingClientRect();
+      const radiusWorld=this.vertexRadiusPx*
+        (this.camera.top-this.camera.bottom)/this.camera.zoom/Math.max(1,bounds.height);
+      const sphere=new THREE.Mesh(new THREE.SphereGeometry(radiusWorld,24,16),
+        new THREE.MeshBasicMaterial({
+          color:0x20f293,transparent:true,opacity:.37,
+          side:THREE.DoubleSide,depthWrite:false,depthTest:false
+        }));
+      sphere.position.copy(v);
+      sphere.renderOrder=16;
+      this.scene.add(sphere);
+      this.hoveredHighlight=sphere;
+      this.hoveredKey=key;
+      this.container.dataset.hoveredTargetKind="vertex";
+      this.container.dataset.hoveredFaceZ=String(hit.target.z);
+      this.container.dataset.vertexHitRadiusPx=String(this.vertexRadiusPx);
+      this.container.dataset.vertexSphereRadiusPx=String(this.vertexRadiusPx);
+      this.container.dataset.vertexSphereVisible="true";
+      this.container.dataset.highlightTriangleCount="0";
+      return;
+    }
+    // Side/sloped faces deliberately receive NO coloured overlay.
+    if(hit.target.z===null||Math.abs(hit.normal.z)<.995){
+      this.clearHighlight();return;
+    }
     const n=hit.normal;
     const distance=n.dot(hit.point);
     const key=[
@@ -262,8 +313,8 @@ export class Preview {
     highlightGeo.setAttribute("position",new THREE.Float32BufferAttribute(vertices,3));
     highlightGeo.setIndex(indices);
     this.hoveredHighlight=new THREE.Mesh(highlightGeo,new THREE.MeshBasicMaterial({
-      color:hit.target.z!==null?0x9ce6ff:0xffd17a,
-      transparent:true,opacity:.38,side:THREE.DoubleSide,
+      color:0x13e1ff,
+      transparent:true,opacity:.72,side:THREE.DoubleSide,
       depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2
     }));
     this.hoveredHighlight.renderOrder=10;
@@ -285,6 +336,9 @@ export class Preview {
     delete this.container.dataset.hoveredFaceZ;
     delete this.container.dataset.hoveredTargetKind;
     delete this.container.dataset.highlightTriangleCount;
+    delete this.container.dataset.vertexHitRadiusPx;
+    delete this.container.dataset.vertexSphereRadiusPx;
+    delete this.container.dataset.vertexSphereVisible;
   }
 
   private resize(): void {
@@ -310,73 +364,115 @@ export class Preview {
     return geometry;
   }
 
-  setMesh(mesh: GeometryMesh | null, options: {
-    pending?: "add" | "cut"; preserveCamera?: boolean; cutTool?:GeometryMesh|null
-  } = {}): void {
-    if(!options.pending)this.setCommittedPickMesh(mesh);
-    if (this.object) {
-      this.scene.remove(this.object);
-      this.object.traverse(node => {
-        if (node instanceof THREE.Mesh || node instanceof THREE.LineSegments) {
-          node.geometry.dispose();
-          const materials = Array.isArray(node.material) ? node.material : [node.material];
-          materials.forEach(material => material.dispose());
-        }
-      });
-      this.object = null;
-    }
-    if (!mesh || mesh.triangles.length === 0) {
+  /** Display buffers are built before the old group is released, so an
+   * async rebuild never renders an empty intermediate scene.
+   * Camera pose is untouched after the first model fit unless explicitly
+   * requested by the user. */
+  setMesh(mesh:GeometryMesh|null, options:{
+    pending?:"add"|"cut"; preserveCamera?:boolean;
+    cutTool?:GeometryMesh|null; fitCamera?:boolean
+  }={}):void{
+    if(!mesh||!mesh.triangles.length){
+      if(this.object)this.retireGroup(this.object);
+      this.object=null;
+      if(!options.pending)this.setCommittedPickMesh(null);
       this.referenceGrid.position.z=0;
       this.container.dataset.gridZ="0";
+      this.container.dataset.renderedSolid="false";
+      delete this.container.dataset.cutToolVisible;
       delete this.container.dataset.displayModelMinZ;
+      delete this.container.dataset.displayBottomZ;
       return;
     }
-    const group = new THREE.Group();
-    group.add(new THREE.Mesh(this.makeGeometry(mesh), new THREE.MeshStandardMaterial({
-      color: options.pending === "add" ? 0x73d1b8 : options.pending === "cut" ? 0xf2af7d : 0x6aacf4,
-      metalness: 0.2, roughness: 0.58, side: THREE.DoubleSide
-    })));
-    if(options.pending==="cut" && options.cutTool && options.cutTool.triangles.length){
-      const tool=new THREE.Mesh(this.makeGeometry(options.cutTool),new THREE.MeshBasicMaterial({
-        color:0xe6304c,transparent:true,opacity:.25,side:THREE.DoubleSide,
-        depthWrite:false,depthTest:false,polygonOffset:true,polygonOffsetFactor:-1
-      }));
-      tool.name="Full cutting tool including overshoot";
-      tool.renderOrder=7;
-      group.add(tool);
-      this.container.dataset.cutToolVisible="true";
-    }else delete this.container.dataset.cutToolVisible;
-    if (mesh.edgeLines.length) {
-      const lines = new THREE.BufferGeometry();
-      lines.setAttribute("position", new THREE.Float32BufferAttribute(mesh.edgeLines, 3));
-      group.add(new THREE.LineSegments(lines, new THREE.LineBasicMaterial({ color: 0x152a45 })));
-    }
-    this.scene.add(group);
-    this.object = group;
-    const bounds = new THREE.Box3().setFromObject(group);
-    const modelBounds = new THREE.Box3().setFromObject(group.children[0]);
-    if(!bounds.isEmpty()&&!modelBounds.isEmpty()){
-      // Include a provisional cutting tool's overshoot in the floor's Z
-      // extent. Moving the visual grid never changes model coordinates.
-      const gridZ=presentationGridZ(modelBounds.min.z,
-        modelBounds.max.z-modelBounds.min.z,bounds.min.z);
-      this.referenceGrid.position.z=gridZ;
-      this.referenceGrid.updateMatrixWorld();
-      this.container.dataset.gridZ=String(gridZ);
-      this.container.dataset.displayModelMinZ=String(modelBounds.min.z);
-      this.container.dataset.displayBottomZ=String(bounds.min.z);
-    }
-    if (!options.preserveCamera && !bounds.isEmpty()) {
-      const center = bounds.getCenter(new THREE.Vector3());
-      const radius = bounds.getSize(new THREE.Vector3()).length();
-      this.orbit.target.copy(center);
-      this.camera.position.copy(center.clone().add(new THREE.Vector3(radius, -radius, radius * 0.9)));
-      this.camera.zoom = Math.max(0.05, 130 / (radius * 1.5));
-      this.camera.updateProjectionMatrix();
-      this.orbit.update();
+    const group=new THREE.Group();
+    try{
+      group.add(new THREE.Mesh(this.makeGeometry(mesh),new THREE.MeshStandardMaterial({
+        color:options.pending==="add"?0x73d1b8:
+          options.pending==="cut"?0xf2af7d:0x6aacf4,
+        metalness:.2,roughness:.58,side:THREE.DoubleSide
+      })));
+      if(options.pending==="cut"&&options.cutTool?.triangles.length){
+        const tool=new THREE.Mesh(this.makeGeometry(options.cutTool),
+          new THREE.MeshBasicMaterial({color:0xe6304c,transparent:true,
+            opacity:.25,side:THREE.DoubleSide,depthWrite:false,
+            depthTest:false,polygonOffset:true,polygonOffsetFactor:-1}));
+        tool.name="Full cutting tool including overshoot";
+        tool.renderOrder=7;
+        group.add(tool);
+      }
+      if(mesh.edgeLines.length){
+        const lines=new THREE.BufferGeometry();
+        lines.setAttribute("position",new THREE.Float32BufferAttribute(mesh.edgeLines,3));
+        group.add(new THREE.LineSegments(lines,
+          new THREE.LineBasicMaterial({color:0x152a45})));
+      }
+      // Add replacement before retiring old geometry; all of this runs
+      // synchronously within one animation frame.
+      const previous=this.object;
+      this.scene.add(group);
+      this.object=group;
+      if(!options.pending)this.setCommittedPickMesh(mesh);
+      if(previous)this.retireGroup(previous);
+      this.container.dataset.renderedSolid="true";
+      if(options.pending==="cut"&&options.cutTool?.triangles.length)
+        this.container.dataset.cutToolVisible="true";
+      else delete this.container.dataset.cutToolVisible;
+      const bounds=new THREE.Box3().setFromObject(group);
+      const modelBounds=new THREE.Box3().setFromObject(group.children[0]);
+      if(!bounds.isEmpty()&&!modelBounds.isEmpty()){
+        const gridZ=presentationGridZ(modelBounds.min.z,
+          modelBounds.max.z-modelBounds.min.z,bounds.min.z);
+        this.referenceGrid.position.z=gridZ;
+        this.referenceGrid.updateMatrixWorld();
+        this.container.dataset.gridZ=String(gridZ);
+        this.container.dataset.displayModelMinZ=String(modelBounds.min.z);
+        this.container.dataset.displayBottomZ=String(bounds.min.z);
+      }
+      if(options.fitCamera||(!this.hasFramedSolid&&!options.preserveCamera)){
+        this.frameBounds(bounds);
+        this.hasFramedSolid=true;
+      }
+      this.container.dataset.cameraDirection=
+        this.camera.position.clone().sub(this.orbit.target).normalize().toArray().join(",");
+    }catch(error){
+      // An incomplete candidate never leaves the viewport blank.
+      if(this.object===group){this.object=null;this.scene.remove(group);}
+      this.disposeGroup(group);
+      throw error;
     }
   }
-
+  private retireGroup(group:THREE.Group):void{
+    this.scene.remove(group);
+    this.disposeGroup(group);
+  }
+  private disposeGroup(group:THREE.Group):void{
+    group.traverse(node=>{
+      if(node instanceof THREE.Mesh||node instanceof THREE.LineSegments){
+        node.geometry.dispose();
+        for(const material of (Array.isArray(node.material)?node.material:[node.material]))
+          material.dispose();
+      }
+    });
+  }
+  private frameBounds(bounds:THREE.Box3):void{
+    if(bounds.isEmpty())return;
+    const center=bounds.getCenter(new THREE.Vector3());
+    const radius=Math.max(1,bounds.getSize(new THREE.Vector3()).length());
+    // Preserve *direction*, including when the user explicitly asks Fit.
+    const direction=this.camera.position.clone().sub(this.orbit.target).normalize();
+    this.orbit.target.copy(center);
+    this.camera.position.copy(center).addScaledVector(direction,Math.max(10,radius*1.4));
+    this.camera.zoom=Math.max(.05,130/(radius*1.5));
+    this.camera.updateProjectionMatrix();
+    this.orbit.update();
+    this.container.dataset.cameraFitCount=String(
+      (Number(this.container.dataset.cameraFitCount)||0)+1);
+  }
+  fitView():void{
+    if(!this.object)return;
+    this.frameBounds(new THREE.Box3().setFromObject(this.object));
+    this.hasFramedSolid=true;
+  }
   private animate = (): void => {
     this.animationId = requestAnimationFrame(this.animate);
     this.orbit.update();
