@@ -20,7 +20,7 @@ import { KernelClient } from "./kernel-client";
 import { Preview } from "./preview";
 import {
   ACTION_LABELS, PREFS_KEY, chordFromEvent, defaultPreferences, displayShortcut,
-  loadPreferences, savePreferences, validatePreferences, validateShortcut,
+  loadPreferences, savePreferences, validatePreferences, validateShortcut, DEFAULT_SKETCH_TEXT, SKETCH_FONT_FAMILIES,
   type Preferences, type ShortcutAction
 } from "./preferences";
 
@@ -47,10 +47,12 @@ root.innerHTML=[
   '  <main id="workbench-layout" class="workspace workbench-layout">',
   '    <section class="panel sketch-section workbench-sketch">',
   '      <div class="panel-head compact-head sketch-titlebar"><div class="header-label"><span class="panel-index">01</span><div><strong>Sketch</strong><small>XY · millimetres</small></div></div>',
-  '        <div id="tool-dock-slot" class="tool-dock-slot" aria-label="Docked sketch tools"></div>',
+  '        <div id="tool-dock-cluster" class="tool-dock-cluster">',
+  '          <button id="tool-dock-toggle" class="rail-tool dock-anchor" aria-label="Dock sketch tools" aria-pressed="false" title="Click to dock/undock; drag along titlebar to move">⚓</button>',
+  '          <div id="tool-dock-slot" class="tool-dock-slot" aria-label="Docked sketch tools"></div>',
+  '        </div>',
   '        <span id="sketch-context" class="chip">Select</span>',
   '        <div class="sketch-title-actions">',
-  '          <button id="tool-dock-toggle" class="text-button tool-dock-toggle" aria-pressed="false" title="Dock/undock sketch tools in title bar">⇥ Dock</button>',
   '          <button id="grid-quick" class="text-button" title="Grid settings (G)">⊞ Grid</button>',
   '          <span id="zoom" class="titlebar-zoom">4 px/mm</span>',
   '          <span id="profile-count" class="titlebar-profiles">3 profiles</span>',
@@ -60,6 +62,7 @@ root.innerHTML=[
   '      <div id="sketch-wrap" class="sketch-wrap">',
   '        <canvas id="sketch" aria-label="2D CAD sketch canvas">Canvas 2D is required</canvas>',
   '        <div id="sketch-tool-rail" class="tool-rail" role="toolbar" aria-label="Sketching tools">',
+  '          <button id="tool-dock-float" class="rail-tool dock-anchor" title="Anchor tools in titlebar" aria-label="Anchor tools in titlebar">⚓</button>',
   '          <button data-tool="select" title="Select (V)" class="rail-tool active" aria-label="Select">↖</button>',
   '          <button data-tool="line" title="Line or polyline (L)" class="rail-tool" aria-label="Line">╱</button>',
   '          <button data-tool="rectangle" title="Corner rectangle (R)" class="rail-tool" aria-label="Rectangle">▭</button>',
@@ -116,11 +119,15 @@ root.innerHTML=[
   '        <details id="properties-details" class="drawer"><summary>Properties <span id="selection-name" class="muted">Nothing selected</span></summary>',
   '          <div id="inspector" class="drawer-content"></div></details>',
   '        <details id="history-details" class="drawer history-drawer"><summary>Feature history <span id="feature-count" class="muted">0 operations</span></summary>',
-  '          <div id="feature-list" class="drawer-content history-content"></div></details>',
+  '          <div id="history-inline-host"><div id="feature-list" class="drawer-content history-content"></div></div></details>',
   '        <details id="profiles-details" class="drawer"><summary>Profiles <span class="muted">Open list</span></summary>',
   '          <div id="profile-list" class="drawer-content"></div></details>',
   '      </div>',
   '    </aside>',
+  '    <section id="history-timeline" class="history-timeline panel" aria-label="Feature timeline">',
+  '      <div class="timeline-head"><strong>History</strong><span id="timeline-indicator">Current solid</span><button id="timeline-now" class="titlebar-action" title="Show current final solid">↪ Now</button></div>',
+  '      <div id="timeline-content" class="timeline-content"></div>',
+  '    </section>',
   '  </main>',
   '</div>',
   '<dialog id="shortcuts-dialog" class="settings-dialog"><div class="dialog-head"><div><strong>Keyboard shortcuts</strong><small>Click a key to rebind it. Empty means unassigned.</small></div><button data-close="shortcuts-dialog">×</button></div>',
@@ -133,7 +140,16 @@ root.innerHTML=[
   '  <div class="dialog-scroll"><label class="field"><span>Control scheme</span><select id="navigation-preset" aria-label="Navigation control scheme"></select></label><p id="navigation-hint" class="navigation-hint"></p>',
   '  <label class="check remember-surface-setting"><input id="remember-surfaces" type="checkbox" checked> Remember mouse interaction surfaces</label>',
   '  <small class="navigation-hint">When enabled, a new extrusion starts at the last clicked horizontal face elevation.</small></div>',
-  '  <footer><button data-close="navigation-dialog" class="button primary">Done</button></footer></dialog>'
+  '  <footer><button data-close="navigation-dialog" class="button primary">Done</button></footer></dialog>',
+  '<dialog id="text-dialog" class="settings-dialog"><div class="dialog-head"><div><strong>Sketch text</strong><small>Canvas annotation typography</small></div><button data-close="text-dialog">×</button></div>',
+  '  <div class="dialog-scroll text-settings"><label class="field"><span>Font</span><select id="sketch-font-family" aria-label="Sketch font"></select></label>',
+  '  <label class="field"><span>Size (px)</span><input id="sketch-font-size" type="number" min="10" max="32" step="1" aria-label="Sketch font size"></label>',
+  '  <label class="field"><span>Weight</span><select id="sketch-font-weight" aria-label="Sketch font weight"><option value="400">Regular</option><option value="500">Medium</option><option value="600">Semibold</option><option value="700">Bold</option></select></label></div>',
+  '  <footer><button id="sketch-text-reset" class="button">Reset sketch text</button><button data-close="text-dialog" class="button primary">Done</button></footer></dialog>',
+  '<dialog id="layout-dialog" class="settings-dialog"><div class="dialog-head"><div><strong>Workspace tiles</strong><small>Rearrange the existing controls without changing CAD data</small></div><button data-close="layout-dialog">×</button></div>',
+  '  <div class="dialog-scroll"><label class="field"><span>Desktop layout</span><select id="tile-mode"><option value="split">Sketch + Solid with inspector below</option><option value="columns">Three adjustable columns</option></select></label>',
+  '  <div id="tile-order" class="tile-order" aria-label="Tile arrangement"></div></div>',
+  '  <footer><button id="tile-reset" class="button">Reset workspace</button><button data-close="layout-dialog" class="button primary">Done</button></footer></dialog>'
 ].join("\n");
 
 function byId<T extends HTMLElement=HTMLElement>(id:string):T{
@@ -234,13 +250,60 @@ function changeToolDock(docked:boolean):void{
   byId("workbench-layout").classList.toggle("tools-docked",docked);
   const toggle=button("tool-dock-toggle");
   toggle.setAttribute("aria-pressed",String(docked));
-  toggle.textContent=docked?"⇤ Undock":"⇥ Dock";
-  toggle.title=docked?"Float sketch tools in canvas":"Anchor sketch tools in title bar";
+  toggle.setAttribute("aria-label",docked?"Undock sketch tools":"Dock sketch tools");
+  toggle.title=docked?"Undock sketch tools (drag to reposition)":"Dock sketch tools (drag to reposition)";
+  button("tool-dock-float").hidden=docked;
+  requestAnimationFrame(positionDockCluster);
 }
 const workspaceLayout=new WorkspaceLayoutController(
   byId("workbench-layout"),byId("workbench-side"),
-  byId("main-resizer"),byId("side-resizer"),changeToolDock
+  byId("main-resizer"),byId("side-resizer"),changeToolDock,
+  ()=>requestAnimationFrame(positionDockCluster)
 );
+/** Dragging the anchor changes only its available flex spacing; the sketch
+ * title and right-side commands remain visible rather than being overlapped. */
+function positionDockCluster():void{
+  const title=byId("tool-dock-cluster").parentElement!;
+  const cluster=byId("tool-dock-cluster");
+  const label=title.querySelector<HTMLElement>(".header-label")!;
+  const actions=title.querySelector<HTMLElement>(".sketch-title-actions")!;
+  const free=Math.max(0,title.clientWidth-label.offsetWidth-
+    actions.offsetWidth-cluster.offsetWidth-28);
+  cluster.style.marginLeft=Math.round(free*workspaceLayout.dockX)+"px";
+  cluster.dataset.dockX=String(workspaceLayout.dockX);
+}
+new ResizeObserver(()=>positionDockCluster()).observe(byId("tool-dock-cluster").parentElement!);
+let wasDockDrag=false;
+const dockAnchor=button("tool-dock-toggle");
+dockAnchor.addEventListener("pointerdown",event=>{
+  if(event.button!==0)return;
+  const title=dockAnchor.closest<HTMLElement>(".sketch-titlebar")!;
+  const cluster=byId("tool-dock-cluster");
+  const label=title.querySelector<HTMLElement>(".header-label")!;
+  const actions=title.querySelector<HTMLElement>(".sketch-title-actions")!;
+  const free=Math.max(1,title.clientWidth-label.offsetWidth-
+    actions.offsetWidth-cluster.offsetWidth-28);
+  const startX=event.clientX,start=workspaceLayout.dockX;
+  let dragged=false;
+  dockAnchor.setPointerCapture(event.pointerId);
+  const move=(e:PointerEvent)=>{
+    if(e.pointerId!==event.pointerId)return;
+    if(Math.abs(e.clientX-startX)>4)dragged=true;
+    if(dragged)workspaceLayout.setDockX(start+(e.clientX-startX)/free);
+  };
+  const stop=(e:PointerEvent)=>{
+    if(e.pointerId!==event.pointerId)return;
+    wasDockDrag=dragged;
+    dockAnchor.removeEventListener("pointermove",move);
+    dockAnchor.removeEventListener("pointerup",stop);
+    dockAnchor.removeEventListener("pointercancel",stop);
+    if(dockAnchor.hasPointerCapture(e.pointerId))dockAnchor.releasePointerCapture(e.pointerId);
+  };
+  dockAnchor.addEventListener("pointermove",move);
+  dockAnchor.addEventListener("pointerup",stop);
+  dockAnchor.addEventListener("pointercancel",stop);
+});
+requestAnimationFrame(positionDockCluster);
 let preview:Preview|null=null;
 try{
   const host=byId("preview");host.replaceChildren();preview=new Preview(host);
@@ -269,6 +332,7 @@ function persistPreferences():void{
     preview?.setNavigationPreset(prefs.navigation);
     byId("extrude-nav-hint").textContent=NAVIGATION_HINTS[prefs.navigation];
     input("remember-surfaces").checked=prefs.rememberSurfaces;
+    root!.style.setProperty("--sketch-text-size",prefs.sketchText.sizePx+"px");
     if(extrudeTarget)positionExtrudeMenu();
   }catch(error){status("Settings invalid: "+String(error),true);}
 }
@@ -414,7 +478,7 @@ function renderHistory():void{
  * from the primary Solid build. A blocked thumbnail request cannot blank
  * the main canvas or reset the camera. */
 function ensureHistoryThumbnails():void{
-  if(!byId<HTMLDetailsElement>("history-details").open||
+  if(!isLandscapeHistory()&&!byId<HTMLDetailsElement>("history-details").open||
     !doc.features.length||historySnapshotDoc===doc||
     thumbnailsRequestedFor===doc)return;
   const snapshot=doc,token=++thumbnailToken;
@@ -911,8 +975,9 @@ const MENU:Record<string,[string,string][]> = {
  model:[["Extrude / Cut (Auto)","feature.extrude"],["Add extrusion","model.add"],
    ["Subtract extrusion","model.cut"],["Feature history","view.history"]],
  view:[["Pan","tool.pan"],["Fit Solid View","view.fit"],["Grid and snapping…","dialog.grid"],["Profile list","view.profiles"],
-   ["Properties","view.properties"],["History","view.history"]],
+   ["Properties","view.properties"],["History","view.history"],["Workspace tiles…","dialog.layout"],["Current solid","view.now"]],
  settings:[["Keyboard shortcuts…","dialog.shortcuts"],["Grid and snapping…","dialog.grid"],
+   ["Sketch text…","dialog.text"],["Workspace tiles…","dialog.layout"],
    ["CAD navigation controls…","dialog.navigation"],
    ["Toggle remember mouse surfaces","prefs.remember"],
    ["Export settings JSON","prefs.export"],["Import settings JSON","prefs.import"],["Reset settings","prefs.reset"]]
@@ -959,6 +1024,9 @@ function command(action:string):void{
     case "dialog.shortcuts":showShortcuts();break;
     case "dialog.grid":showGrid();break;
     case "dialog.navigation":showNavigation();break;
+    case "dialog.text":showTextSettings();break;
+    case "dialog.layout":showLayoutSettings();break;
+    case "view.now":historyPanel.clearSelection();break;
     case "prefs.export":exportSettings();break;
     case "prefs.import":input("settings-input").click();break;
     case "prefs.remember":
@@ -992,6 +1060,68 @@ function renderShortcuts():void {
       persistPreferences();renderShortcuts();
     };
     row.append(title,key,clear);area.append(row);
+  }
+}
+function showTextSettings():void{
+  closeMenu();
+  const selectFont=select("sketch-font-family");
+  selectFont.replaceChildren();
+  for(const font of SKETCH_FONT_FAMILIES){
+    const option=document.createElement("option");option.value=font;option.textContent=font.split(",")[0];
+    selectFont.add(option);
+  }
+  selectFont.value=prefs.sketchText.fontFamily;
+  input("sketch-font-size").value=String(prefs.sketchText.sizePx);
+  select("sketch-font-weight").value=String(prefs.sketchText.weight);
+  dialog("text-dialog").showModal();
+}
+function commitTextSettings():void{
+  try{
+    prefs=validatePreferences({...prefs,sketchText:{
+      fontFamily:select("sketch-font-family").value as Preferences["sketchText"]["fontFamily"],
+      sizePx:Number(input("sketch-font-size").value),
+      weight:Number(select("sketch-font-weight").value) as Preferences["sketchText"]["weight"]
+    }});
+    persistPreferences();
+  }catch(error){status("Sketch font settings invalid: "+String(error),true);}
+}
+function showLayoutSettings():void{
+  closeMenu();
+  select("tile-mode").value=workspaceLayout.tileMode;
+  renderLayoutTileOrder();
+  dialog("layout-dialog").showModal();
+}
+function renderLayoutTileOrder():void{
+  const host=byId("tile-order");host.replaceChildren();
+  const order=workspaceLayout.tileOrder;
+  for(const [index,id] of order.entries()){
+    const row=document.createElement("div");
+    row.className="tile-order-row";row.draggable=true;row.dataset.tile=id;
+    const label=document.createElement("strong");
+    label.textContent=(index+1)+". "+({sketch:"Sketch",solid:"Solid",properties:"Properties / inspector"}[id]);
+    const move=(delta:number)=>{
+      const n=index+delta;
+      if(n<0||n>=order.length)return;
+      const next=[...order] as typeof order;
+      [next[index],next[n]]=[next[n],next[index]];
+      workspaceLayout.setTileOrder(next);renderLayoutTileOrder();
+    };
+    const left=document.createElement("button");left.className="titlebar-action";
+    left.textContent="←";left.title="Move left";left.disabled=index===0;left.onclick=()=>move(-1);
+    const right=document.createElement("button");right.className="titlebar-action";
+    right.textContent="→";right.title="Move right";right.disabled=index===order.length-1;
+    right.onclick=()=>move(1);
+    row.addEventListener("dragstart",event=>{event.dataTransfer?.setData("text/plain",id);});
+    row.addEventListener("dragover",event=>event.preventDefault());
+    row.addEventListener("drop",event=>{
+      event.preventDefault();
+      const moving=event.dataTransfer?.getData("text/plain") as typeof id|undefined;
+      if(!moving||!order.includes(moving)||moving===id)return;
+      const copy=order.filter(x=>x!==moving);
+      copy.splice(copy.indexOf(id),0,moving);
+      workspaceLayout.setTileOrder(copy);renderLayoutTileOrder();
+    });
+    row.append(label,left,right);host.append(row);
   }
 }
 function showNavigation():void{
@@ -1092,7 +1222,31 @@ button("selection-delete").onclick=()=>safe(removeSelected);
 button("selection-duplicate").onclick=()=>safe(duplicateSelected);
 button("selection-properties").onclick=()=>toggleDetails("properties-details");
 button("grid-quick").onclick=showGrid;
-button("tool-dock-toggle").onclick=()=>workspaceLayout.setDocked(!workspaceLayout.docked);
+button("tool-dock-toggle").onclick=()=>{
+  if(wasDockDrag){wasDockDrag=false;return;}
+  workspaceLayout.setDocked(!workspaceLayout.docked);
+};
+button("tool-dock-float").onclick=()=>workspaceLayout.setDocked(true);
+button("timeline-now").onclick=()=>historyPanel.clearSelection();
+select("tile-mode").onchange=()=>{
+  workspaceLayout.setTileMode(select("tile-mode").value as "split"|"columns");
+};
+button("tile-reset").onclick=()=>{
+  workspaceLayout.resetArrangement();select("tile-mode").value=workspaceLayout.tileMode;
+  renderLayoutTileOrder();
+};
+for(const id of ["sketch-font-family","sketch-font-size","sketch-font-weight"]){
+  byId(id).addEventListener("change",commitTextSettings);
+}
+button("sketch-text-reset").onclick=()=>{
+  prefs=validatePreferences({...prefs,sketchText:{...DEFAULT_SKETCH_TEXT}});
+  persistPreferences();showTextSettingsRefresh();
+};
+function showTextSettingsRefresh():void{
+  select("sketch-font-family").value=prefs.sketchText.fontFamily;
+  input("sketch-font-size").value=String(prefs.sketchText.sizePx);
+  select("sketch-font-weight").value=String(prefs.sketchText.weight);
+}
 button("fit-solid").onclick=()=>preview?.fitView();
 byId<HTMLDetailsElement>("history-details").addEventListener("toggle",()=>{
   if(byId<HTMLDetailsElement>("history-details").open)
@@ -1175,7 +1329,7 @@ document.addEventListener("keydown",event=>{
     }catch(error){byId("shortcut-error").textContent=String(error);}
     return;
   }
-  if(dialog("shortcuts-dialog").open||dialog("grid-dialog").open||dialog("navigation-dialog").open)return;
+  if(["shortcuts-dialog","grid-dialog","navigation-dialog","text-dialog","layout-dialog"].some(x=>dialog(x).open))return;
   if(!byId("extrude-flyout").hidden){
     if(event.code==="Escape"){event.preventDefault();closeExtrude();setTool("select");return;}
     if(event.code==="Enter"){event.preventDefault();applyExtrude();return;}
@@ -1201,7 +1355,7 @@ document.addEventListener("keydown",event=>{
 });
 document.addEventListener("keydown",event=>{
   if(event.code==="Space"&&!event.repeat&&!(event.target as HTMLElement).closest("input,textarea,select")&&
-    !dialog("shortcuts-dialog").open&&!dialog("grid-dialog").open&&!dialog("navigation-dialog").open){
+    !["shortcuts-dialog","grid-dialog","navigation-dialog","text-dialog","layout-dialog"].some(x=>dialog(x).open)){
     if(activeTool!=="pan"){event.preventDefault();priorTool=activeTool;setTool("pan");}
   }
 });
@@ -1215,8 +1369,22 @@ window.addEventListener("storage",event=>{
     preview?.setNavigationPreset(prefs.navigation);
     byId("extrude-nav-hint").textContent=NAVIGATION_HINTS[prefs.navigation];
     input("remember-surfaces").checked=prefs.rememberSurfaces;
+    root!.style.setProperty("--sketch-text-size",prefs.sketchText.sizePx+"px");
   }
 });
 byId("extrude-nav-hint").textContent=NAVIGATION_HINTS[prefs.navigation];
-window.addEventListener("resize",()=>positionExtrudeMenu());
+function isLandscapeHistory():boolean{
+  return window.matchMedia("(orientation: landscape) and (min-width:780px)").matches;
+}
+function placeHistoryTimeline():void{
+  const target=byId(isLandscapeHistory()?"timeline-content":"history-inline-host");
+  const list=byId("feature-list");
+  if(list.parentElement!==target)target.append(list);
+  if(isLandscapeHistory())ensureHistoryThumbnails();
+}
+window.addEventListener("resize",()=>{
+  positionExtrudeMenu();placeHistoryTimeline();requestAnimationFrame(positionDockCluster);
+});
+root.style.setProperty("--sketch-text-size",prefs.sketchText.sizePx+"px");
+placeHistoryTimeline();
 setTool(activeTool);render();rebuild();
