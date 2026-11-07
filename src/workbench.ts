@@ -10,6 +10,7 @@ import { placeExtrudeMenu } from "./extrude-placement";
 import { depthToFace } from "./signed-extrusion";
 import { NAVIGATION_HINTS, NAVIGATION_LABELS, NAVIGATION_PRESETS, type NavigationPreset } from "./navigation";
 import type { KernelBuild } from "./kernel-protocol";
+import { featureForSurface, formatSurfaceTarget, type SurfaceTarget } from "./surface-interaction";
 import { SketchCanvas, type SketchTool } from "./sketch-canvas-v2";
 import { KernelClient } from "./kernel-client";
 import { Preview } from "./preview";
@@ -88,7 +89,10 @@ root.innerHTML=[
   '      <section class="panel preview-panel">',
   '        <div class="panel-head compact-head"><div class="header-label"><span class="panel-index">02</span><div><strong>Solid</strong><small>Orbit · zoom · inspect</small></div></div><span class="chip">Z ↑</span></div>',
   '        <div id="preview" class="preview-root"><span class="placeholder">Loading 3D preview…</span></div>',
+  '        <span id="face-target-label" class="face-target-label" hidden></span>',
+  '        <div id="face-context-menu" class="face-context-menu" role="menu" hidden></div>',
   '        <span id="solid-preview-status" class="solid-preview-status" hidden>PREVIEW · NOT APPLIED</span>',
+  '        <span id="cut-tool-metrics" class="cut-tool-metrics" hidden></span>',
   '      </section>',
   '      <div class="inspector-drawer">',
   '        <details id="properties-details" class="drawer"><summary>Properties <span id="selection-name" class="muted">Nothing selected</span></summary>',
@@ -112,7 +116,9 @@ root.innerHTML=[
   '  <div id="grid-rows" class="dialog-scroll"></div><div id="grid-error" role="alert" class="validation-error"></div>',
   '  <footer><button id="grid-reset" class="button">Reset defaults</button><button data-close="grid-dialog" class="button primary">Done</button></footer></dialog>',
   '<dialog id="navigation-dialog" class="settings-dialog"><div class="dialog-head"><div><strong>CAD navigation controls</strong><small>Choose the mouse behavior familiar from your CAD application.</small></div><button data-close="navigation-dialog">×</button></div>',
-  '  <div class="dialog-scroll"><label class="field"><span>Control scheme</span><select id="navigation-preset" aria-label="Navigation control scheme"></select></label><p id="navigation-hint" class="navigation-hint"></p></div>',
+  '  <div class="dialog-scroll"><label class="field"><span>Control scheme</span><select id="navigation-preset" aria-label="Navigation control scheme"></select></label><p id="navigation-hint" class="navigation-hint"></p>',
+  '  <label class="check remember-surface-setting"><input id="remember-surfaces" type="checkbox" checked> Remember mouse interaction surfaces</label>',
+  '  <small class="navigation-hint">When enabled, a new extrusion starts at the last clicked horizontal face elevation.</small></div>',
   '  <footer><button data-close="navigation-dialog" class="button primary">Done</button></footer></dialog>'
 ].join("\n");
 
@@ -142,6 +148,9 @@ let activeMenu:string|null=null;
 let extrudeTarget:string|null=null,extrudeTargets:string[]=[];
 let extrudeCursor:{x:number,y:number}|null=null;
 let facePickField:"z"|"depth"="depth";
+let lastSurfaceZ:number|null=null;
+let contextSurface:SurfaceTarget|null=null;
+let contextFeatureId:string|null=null;
 let previewEnabled=true,previewToken=0,previewInFlight=false;
 let previewTimer:ReturnType<typeof setTimeout>|undefined;
 let committedBuild:KernelBuild|null=null;
@@ -183,7 +192,12 @@ let preview:Preview|null=null;
 try{
   const host=byId("preview");host.replaceChildren();preview=new Preview(host);
   preview.setNavigationPreset(prefs.navigation);
-  preview.setFacePickHandler(z=>fillFocusedFieldFromFace(z));
+  preview.setFacePickHandler(z=>{
+    if(z!==null)lastSurfaceZ=z;
+    fillFocusedFieldFromFace(z);
+  });
+  preview.setSurfaceHoverHandler((target,pointer)=>updateSurfaceLabel(target,pointer));
+  preview.setSurfaceMenuHandler((target,pointer)=>showSurfaceContext(target,pointer));
 }catch(error){
   byId("preview").textContent="3D preview unavailable; sketching and STEP export remain available";
   status(String(error),true);
@@ -201,6 +215,7 @@ function persistPreferences():void{
     prefs=validatePreferences(prefs);savePreferences(prefs);canvas.setPreferences(prefs);
     preview?.setNavigationPreset(prefs.navigation);
     byId("extrude-nav-hint").textContent=NAVIGATION_HINTS[prefs.navigation];
+    input("remember-surfaces").checked=prefs.rememberSurfaces;
     if(extrudeTarget)positionExtrudeMenu();
   }catch(error){status("Settings invalid: "+String(error),true);}
 }
@@ -457,6 +472,10 @@ function textNode(text:string):HTMLElement{
 }
 function restoreCommittedPreview():void {
   const host=byId("preview");
+  delete host.dataset.cutToolVolumeMm3;
+  delete host.dataset.cutRemovedVolumeMm3;
+  delete host.dataset.cutToolBoundsMm;
+  byId("cut-tool-metrics").hidden=true;
   delete host.dataset.previewState;
   delete host.dataset.previewVolumeMm3;
   delete host.dataset.previewOperation;
@@ -470,6 +489,7 @@ function closeExtrude():void {
   extrudeTarget=null;
   extrudeTargets=[];
   byId("extrude-flyout").hidden=true;
+  hideSurfaceContext();
   canvas.setExtrudeHandle(null);
   restoreCommittedPreview();
 }
@@ -538,6 +558,91 @@ function fillFocusedFieldFromFace(z:number|null):void {
   scheduleOperationPreview();
   field.focus({preventScroll:true});
 }
+/** Cursor-adjacent label for the committed Solid face/vertex target. */
+function updateSurfaceLabel(target:SurfaceTarget|null,pointer:{x:number,y:number}):void{
+  const tag=byId("face-target-label");
+  if(!target){
+    tag.hidden=true;
+    delete byId("preview").dataset.hoverLabel;
+    return;
+  }
+  const armed=extrudeTargets.length?facePickField:null;
+  const start=Number(input("extrude-z").value);
+  const label=formatSurfaceTarget(target,armed,Number.isFinite(start)?start:0);
+  if(!label){tag.hidden=true;return;}
+  tag.textContent=label;
+  tag.hidden=false;
+  byId("preview").dataset.hoverLabel=label;
+  const parent=byId("preview").parentElement!.getBoundingClientRect();
+  const x=pointer.x-parent.left+13,y=pointer.y-parent.top+14;
+  tag.style.left=Math.max(7,Math.min(parent.width-195,x))+"px";
+  tag.style.top=Math.max(47,Math.min(parent.height-35,y))+"px";
+}
+function hideSurfaceContext():void{
+  byId("face-context-menu").hidden=true;
+  contextSurface=null;contextFeatureId=null;
+}
+function showSurfaceContext(target:SurfaceTarget|null,pointer:{x:number,y:number}):void{
+  hideSurfaceContext();
+  if(!target)return;
+  if(target.z!==null)lastSurfaceZ=target.z;
+  contextSurface=target;
+  const panel=byId("face-context-menu");
+  panel.replaceChildren();
+  const title=document.createElement("div");
+  title.className="face-context-title";
+  title.textContent=formatSurfaceTarget(target,null,0);
+  panel.append(title);
+  const hasProfile=extrudeTargets.length>0||selectedIds.length>0;
+  const action=(name:string,enabled:boolean,run:()=>void)=>{
+    const btn=document.createElement("button");
+    btn.type="button";btn.role="menuitem";btn.textContent=name;
+    btn.disabled=!enabled;btn.dataset.faceAction=name;
+    btn.onclick=()=>{hideSurfaceContext();run();};
+    panel.append(btn);
+  };
+  action("Latch Start Z",target.z!==null&&hasProfile,()=>{
+    if(!extrudeTargets.length)openExtrude();
+    facePickField="z";
+    fillFocusedFieldFromFace(target.z);
+  });
+  action("Latch Depth",target.z!==null&&hasProfile,()=>{
+    if(!extrudeTargets.length)openExtrude();
+    facePickField="depth";
+    fillFocusedFieldFromFace(target.z);
+  });
+  const feature=featureForSurface(doc,target);
+  let deletable=false;
+  if(feature){
+    try{
+      validateDocument({...doc,features:doc.features.filter(f=>f.id!==feature.id)});
+      deletable=true;
+    }catch{deletable=false;}
+  }
+  contextFeatureId=deletable&&feature?feature.id:null;
+  action("Delete Feature",deletable&&feature!==null,()=>{
+    if(!feature)return;
+    safe(()=>{
+      const next=validateDocument({...doc,features:doc.features.filter(f=>f.id!==feature.id)});
+      closeExtrude();
+      change(next);
+      status("Deleted feature "+feature.id+" · Undo restores it");
+    });
+  });
+  if(!feature){
+    const note=document.createElement("small");
+    note.className="face-context-note";
+    note.textContent="Delete unavailable: no uniquely identified source feature";
+    panel.append(note);
+  }
+  const rect=byId("preview").parentElement!.getBoundingClientRect();
+  panel.style.left=Math.max(8,Math.min(rect.width-230,pointer.x-rect.left))+"px";
+  panel.style.top=Math.max(48,Math.min(rect.height-176,pointer.y-rect.top))+"px";
+  panel.hidden=false;
+  byId("preview").dataset.contextTargetKind=target.kind;
+  if(contextFeatureId)byId("preview").dataset.contextFeatureId=contextFeatureId;
+  else delete byId("preview").dataset.contextFeatureId;
+}
 function previewError(error:unknown):void {
   const label=byId("extrude-preview-error");
   label.hidden=false;
@@ -574,12 +679,30 @@ function scheduleOperationPreview():void {
     if(previewInFlight)return;
     previewInFlight=true;
     try{
-      const result=await kernel.build(candidate);
+      const pendingIds=candidate.features.slice(source.features.length).map(f=>f.id);
+      const result=await kernel.build(candidate,{cutToolFeatureIds:mode==="cut"?pendingIds:[]});
       if(token!==previewToken||doc!==source||!extrudeTargets.length||!input("extrude-preview").checked)return;
-      preview?.setMesh(result.mesh,{pending:mode,preserveCamera:true});
+      preview?.setMesh(result.mesh,{pending:mode,preserveCamera:true,
+        cutTool:result.cutTool?.mesh});
       host.dataset.previewState="ready";
       host.dataset.previewOperation=mode;
       if(result.statistics)host.dataset.previewVolumeMm3=String(result.statistics.volumeMm3);
+      const metrics=byId("cut-tool-metrics");
+      if(mode==="cut"&&result.cutTool&&result.statistics&&lastStats){
+        const full=result.cutTool.statistics.volumeMm3;
+        const removed=Math.max(0,lastStats.volumeMm3-result.statistics.volumeMm3);
+        host.dataset.cutToolVolumeMm3=String(full);
+        host.dataset.cutRemovedVolumeMm3=String(removed);
+        host.dataset.cutToolBoundsMm=JSON.stringify(result.cutTool.statistics.boundsMm);
+        metrics.textContent="Red tool: "+full.toFixed(2)+" mm³ · Material removed: "+
+          removed.toFixed(2)+" mm³ · Overshoot shown";
+        metrics.hidden=false;
+      }else{
+        delete host.dataset.cutToolVolumeMm3;
+        delete host.dataset.cutRemovedVolumeMm3;
+        delete host.dataset.cutToolBoundsMm;
+        metrics.hidden=true;
+      }
       label.hidden=false;
       label.textContent="PREVIEW · "+mode.toUpperCase()+" · NOT APPLIED";
     }catch(e){
@@ -612,8 +735,15 @@ function updateExtrudeMode():void {
   }
   if(mode==="cut"&&doc.features.length&&!thru.checked){
     const [lo,hi]=throughAllBounds();
-    input("extrude-z").value=String(lo);
-    input("extrude-depth").value=String(hi-lo);
+    const remembered=prefs.rememberSurfaces?lastSurfaceZ:null;
+    if(remembered!==null&&remembered>=lo&&remembered<=hi){
+      input("extrude-z").value=String(remembered);
+      input("extrude-depth").value=String(
+        remembered>lo?lo-remembered:hi-remembered);
+    }else{
+      input("extrude-z").value=String(lo);
+      input("extrude-depth").value=String(hi-lo);
+    }
     thru.checked=true;
   }
   canvas.setExtrudeHandle({id:extrudeTarget,depth:Number(input("extrude-depth").value)||8});
@@ -649,7 +779,10 @@ function openExtrude(id?:string,operation?:"add"|"cut",at?:Point2):void {
   byId("extrude-target").textContent=ids.length>1?
     ids.length+" profiles selected":targets[0].kind+" · "+ids[0].slice(0,12);
   select("extrude-mode").value=operation||"auto";
-  input("extrude-z").value="0";
+  const remembered=prefs.rememberSurfaces&&lastSurfaceZ!==null&&
+    doc.features.some(f=>Math.abs(f.z-lastSurfaceZ!)<.001||
+      Math.abs(f.z+f.depth-lastSurfaceZ!)<.001)?lastSurfaceZ:0;
+  input("extrude-z").value=String(remembered);
   input("extrude-depth").value="8";
   input("extrude-through").checked=false;
   input("extrude-preview").checked=previewEnabled;
@@ -683,6 +816,7 @@ function saveProject():void{
   status("Editable native project downloaded");
 }
 function newProject():void {
+  lastSurfaceZ=null;
   selectedId=null;closeExtrude();
   change({schemaVersion:2,name:"Untitled part",units:"mm",profiles:[],features:[]});
   setTool("select");
@@ -690,7 +824,7 @@ function newProject():void {
 async function openProject(file:File):Promise<void>{
   if(file.size>2_000_000)throw new Error("Project exceeds 2 MB");
   const loaded=validateDocument(JSON.parse(await file.text()));
-  doc=loaded;history=[doc];historyIndex=0;selectedId=null;
+  doc=loaded;history=[doc];historyIndex=0;selectedId=null;lastSurfaceZ=null;
   persistDocument();closeExtrude();render();rebuild();
   status("Project loaded · "+doc.profiles.length+" profiles");
 }
@@ -715,6 +849,7 @@ const MENU:Record<string,[string,string][]> = {
    ["Properties","view.properties"],["History","view.history"]],
  settings:[["Keyboard shortcuts…","dialog.shortcuts"],["Grid and snapping…","dialog.grid"],
    ["CAD navigation controls…","dialog.navigation"],
+   ["Toggle remember mouse surfaces","prefs.remember"],
    ["Export settings JSON","prefs.export"],["Import settings JSON","prefs.import"],["Reset settings","prefs.reset"]]
 };
 function closeMenu():void{activeMenu=null;byId("menu-popover").hidden=true;}
@@ -760,6 +895,11 @@ function command(action:string):void{
     case "dialog.navigation":showNavigation();break;
     case "prefs.export":exportSettings();break;
     case "prefs.import":input("settings-input").click();break;
+    case "prefs.remember":
+      prefs=validatePreferences({...prefs,rememberSurfaces:!prefs.rememberSurfaces});
+      persistPreferences();
+      status("Remember mouse surfaces "+(prefs.rememberSurfaces?"enabled":"disabled"));
+      break;
     case "prefs.reset":prefs=defaultPreferences();persistPreferences();status("Settings reset to defaults");break;
   }
 }
@@ -797,6 +937,7 @@ function showNavigation():void{
     option.textContent=NAVIGATION_LABELS[preset];control.append(option);
   }
   control.value=prefs.navigation;
+  input("remember-surfaces").checked=prefs.rememberSurfaces;
   byId("navigation-hint").textContent=NAVIGATION_HINTS[prefs.navigation];
   dialog("navigation-dialog").showModal();
 }
@@ -850,12 +991,17 @@ async function importSettings(file:File):Promise<void>{
   if(dialog("grid-dialog").open)renderGrid();
   if(dialog("navigation-dialog").open){
     select("navigation-preset").value=prefs.navigation;
+    input("remember-surfaces").checked=prefs.rememberSurfaces;
     byId("navigation-hint").textContent=NAVIGATION_HINTS[prefs.navigation];
   }
   status("Settings imported and applied");
 }
 
 // UI events. All menu commands reuse the exact same implementations as direct controls.
+input("remember-surfaces").onchange=()=>{
+  prefs=validatePreferences({...prefs,rememberSurfaces:input("remember-surfaces").checked});
+  persistPreferences();
+};
 select("navigation-preset").onchange=()=>{
   prefs=validatePreferences({...prefs,navigation:select("navigation-preset").value as NavigationPreset});
   persistPreferences();
@@ -872,6 +1018,7 @@ byId("sketch-wrap").addEventListener("pointerdown",event=>{
 });
 document.addEventListener("pointerdown",event=>{
   if(!(event.target as HTMLElement).closest("#menus"))closeMenu();
+  if(!(event.target as HTMLElement).closest("#face-context-menu"))hideSurfaceContext();
 });
 button("quick-extrude").onclick=()=>openExtrude();
 button("selection-extrude").onclick=()=>openExtrude();
@@ -974,7 +1121,10 @@ document.addEventListener("keydown",event=>{
   const selectedShortcut=Object.entries(prefs.shortcuts).find(([,value])=>value===chord)?.[0];
   if(selectedShortcut){event.preventDefault();command(selectedShortcut);return;}
   if(chord==="Control+KeyY"){event.preventDefault();undoRedo(historyIndex+1);return;}
-  if(chord==="Escape"){if(activeMenu)closeMenu();else setTool("select");return;}
+  if(chord==="Escape"){
+    if(!byId("face-context-menu").hidden)hideSurfaceContext();
+    else if(activeMenu)closeMenu();else setTool("select");return;
+  }
 });
 document.addEventListener("keydown",event=>{
   if(event.code==="Space"&&!event.repeat&&!(event.target as HTMLElement).closest("input,textarea,select")&&
@@ -991,6 +1141,7 @@ window.addEventListener("storage",event=>{
     prefs=loadPreferences();canvas.setPreferences(prefs);
     preview?.setNavigationPreset(prefs.navigation);
     byId("extrude-nav-hint").textContent=NAVIGATION_HINTS[prefs.navigation];
+    input("remember-surfaces").checked=prefs.rememberSurfaces;
   }
 });
 byId("extrude-nav-hint").textContent=NAVIGATION_HINTS[prefs.navigation];

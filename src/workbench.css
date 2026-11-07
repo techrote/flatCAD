@@ -252,3 +252,41 @@ kbd{
 .extrude-flyout input[type="number"]:focus{
   outline:2px solid #66acef;outline-offset:0;
 }
+
+/* Solid face targeting, context commands, and full cutting-tool overlays. */
+.face-target-label{
+  pointer-events:none;position:absolute;z-index:30;
+  max-width:215px;min-width:90px;
+  padding:6px 9px;border:1px solid #80bde5;border-radius:6px;
+  color:#eaf7ff;background:#132b43eb;box-shadow:0 5px 14px #0009;
+  font:11px ui-monospace,Consolas,monospace;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.face-context-menu{
+  position:absolute;z-index:50;display:flex;flex-direction:column;
+  width:220px;padding:5px;border:1px solid #547e9c;
+  border-radius:8px;background:#172b40f5;box-shadow:0 12px 30px #0009;
+}
+.face-context-menu .face-context-title{
+  padding:7px 10px;font:10px ui-monospace,Consolas,monospace;
+  color:#9dc8e7;border-bottom:1px solid #42617f;max-width:100%;
+  overflow:hidden;text-overflow:ellipsis;
+}
+.face-context-menu button{
+  border:0;border-radius:5px;background:transparent;color:#e4edf7;
+  text-align:left;font:12px ui-sans-serif,system-ui,sans-serif;
+  padding:10px 11px;cursor:pointer;
+}
+.face-context-menu button:hover:not(:disabled){
+  background:#355d7e;
+}
+.face-context-menu button:disabled{opacity:.4;cursor:not-allowed}
+.face-context-menu .face-context-note{padding:8px 9px;color:#7da4c0;line-height:1.35}
+.cut-tool-metrics{
+  position:absolute;bottom:12px;left:12px;right:12px;z-index:8;
+  padding:9px 11px;background:#441e30eb;border:1px solid #c75a75;
+  color:#ffced8;border-radius:6px;
+  font:11px ui-monospace,Consolas,monospace;
+  pointer-events:none;
+}
+.remember-surface-setting{margin-top:20px;padding:8px 0;font-weight:550}

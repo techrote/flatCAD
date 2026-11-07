@@ -6,7 +6,7 @@ import { setOC, sketchRectangle, sketchCircle, measureVolume, type Shape3D } fro
 import { polygonPoints } from "./geometry";
 import { signedInterval } from "./signed-extrusion";
 import { validateDocument, type Feature, type Profile } from "./model";
-import type { KernelRequest, KernelResponse, GeometryMesh, KernelStatistics } from "./kernel-protocol";
+import type { KernelRequest, KernelResponse, GeometryMesh, KernelStatistics, PreviewTool } from "./kernel-protocol";
 
 const worker = self as DedicatedWorkerGlobalScope;
 let initializePromise: Promise<void> | null = null;
@@ -94,12 +94,43 @@ function makeSolid(document: ReturnType<typeof validateDocument>): Shape3D | nul
   }
 }
 
+function measureAndMesh(solid:Shape3D):{mesh:GeometryMesh,statistics:KernelStatistics}{
+  const volumeMm3=measureVolume(solid);
+  const bbox=solid.boundingBox;
+  const boundsMm=bbox.bounds;
+  bbox.delete();
+  if(!Number.isFinite(volumeMm3)||volumeMm3<=0)
+    throw new Error("B-rep solid has invalid or zero volume");
+  const faces=solid.mesh({tolerance:.08,angularTolerance:.2});
+  const edges=solid.meshEdges({tolerance:.08,angularTolerance:.2});
+  return {statistics:{volumeMm3,boundsMm},mesh:{
+    vertices:faces.vertices,triangles:faces.triangles,
+    normals:faces.normals,edgeLines:edges.lines
+  }};
+}
+
+/** The cutting tool is a separate exact B-rep before Boolean intersection.
+ *  Its full Z range is retained, including overshoot outside the base solid. */
+function makeCutTool(
+  doc:ReturnType<typeof validateDocument>, ids:readonly string[]
+):PreviewTool|null{
+  if(!ids.length)return null;
+  if(new Set(ids).size!==ids.length)throw new Error("Duplicate cut-tool feature ID");
+  const chosen=ids.map(id=>doc.features.find(f=>f.id===id));
+  if(chosen.some(f=>!f||f.operation!=="cut"))
+    throw new Error("Cut preview references unknown or non-cut feature");
+  const toolDoc={...doc,features:(chosen as Feature[]).map(f=>({...f,operation:"add" as const}))};
+  const tool=makeSolid(toolDoc);
+  if(!tool)throw new Error("No cut-tool geometry");
+  try{return measureAndMesh(tool);}finally{tool.delete();}
+}
+
 async function handle(request: KernelRequest): Promise<void> {
   try {
     const document = validateDocument(request.document);
     if (!document.features.length) {
       if (request.action === "step") throw new Error("Add an extrusion before exporting STEP");
-      worker.postMessage({ id: request.id, ok: true, action: "build", mesh: null, statistics: null } satisfies KernelResponse);
+      worker.postMessage({ id: request.id, ok: true, action: "build", mesh: null, statistics: null, cutTool: null } satisfies KernelResponse);
       return;
     }
     await initialize();
@@ -111,23 +142,11 @@ async function handle(request: KernelRequest): Promise<void> {
         worker.postMessage({ id: request.id, ok: true, action: "step", blob } satisfies KernelResponse);
         return;
       }
-      const volumeMm3 = measureVolume(solid);
-      const bbox = solid.boundingBox;
-      const boundsMm = bbox.bounds;
-      bbox.delete();
-      if (!Number.isFinite(volumeMm3) || volumeMm3 <= 0) {
-        throw new Error("B-rep solid has invalid or zero volume");
-      }
-      const statistics: KernelStatistics = { volumeMm3, boundsMm };
-      const faces = solid.mesh({ tolerance: 0.08, angularTolerance: 0.2 });
-      const edges = solid.meshEdges({ tolerance: 0.08, angularTolerance: 0.2 });
-      const mesh: GeometryMesh = {
-        vertices: faces.vertices,
-        triangles: faces.triangles,
-        normals: faces.normals,
-        edgeLines: edges.lines
-      };
-      worker.postMessage({ id: request.id, ok: true, action: "build", mesh, statistics } satisfies KernelResponse);
+      const {mesh,statistics}=measureAndMesh(solid);
+      const cutTool=makeCutTool(document,request.cutToolFeatureIds??[]);
+      worker.postMessage({
+        id:request.id,ok:true,action:"build",mesh,statistics,cutTool
+      } satisfies KernelResponse);
     } finally {
       solid.delete();
     }
