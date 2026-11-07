@@ -1,0 +1,69 @@
+name: flatCAD UI cross-browser acceptance
+
+on:
+  pull_request:
+    paths:
+      - 'src/preview.ts'
+      - 'src/floating-views.ts'
+      - 'src/workbench.ts'
+      - 'src/layout.css'
+      - 'src/workspace-layout.ts'
+      - 'src/render-nav.ts'
+      - 'src/render-settings.ts'
+      - 'e2e/**'
+      - 'playwright.config.ts'
+      - '.github/workflows/ui-acceptance.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  graphical-acceptance:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            browser: chromium
+            label: windows-chromium
+          - runner: windows-latest
+            browser: firefox
+            label: windows-firefox
+          - runner: ubuntu-24.04
+            browser: firefox
+            label: linux-firefox
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: package.json
+      - name: Install application dependencies
+        run: npm install --no-audit --no-fund
+      - name: Install browser dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: Install browser (Windows)
+        if: runner.os == 'Windows'
+        run: npx playwright install ${{ matrix.browser }}
+      - name: Build exact-source production bundle
+        run: npm run build
+      - name: Exercise real rendering, camera interaction and layout persistence
+        env:
+          FLATCAD_E2E_BROWSER: ${{ matrix.browser }}
+        run: npm run test:e2e -- --grep "floating|Float|viewport|history Cut|View/Layout/Render|idle Solid|three-column layout|resizing both dividers"
+      - name: Upload screenshots and browser traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flatcad-ui-${{ matrix.label }}-${{ github.sha }}
+          path: test-results/
+          if-no-files-found: warn
