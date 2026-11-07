@@ -16,7 +16,13 @@ export default defineConfig({
     headless: true,
     launchOptions: browserName==="chromium"
       ? { args: ["--enable-unsafe-swiftshader", "--use-angle=swiftshader"] }
-      : {},
+      : { firefoxUserPrefs: {
+          // CI VMs are GPU-less; Firefox otherwise disables WebGL2 outright.
+          // These apply ONLY to the controlled Playwright test profile.
+          "webgl.force-enabled": true,
+          "webgl.disabled": false,
+          "gfx.webrender.software": true
+        } },
     trace: "retain-on-failure",
     screenshot: "only-on-failure"
   },
