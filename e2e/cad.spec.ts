@@ -1328,6 +1328,11 @@ test("multiple floating renders preserve independent cameras and optionally hidd
   await page.screenshot({path:testInfo.outputPath("dragged-view-and-hidden-tile.png")});
   await page.reload();
   await expect(views).toHaveCount(2);
+  // Foreground identity must also persist: an overlapping sibling must not
+  // swallow the reloaded active view's Close navigation control.
+  const restoredFirstZ=await views.first().evaluate(el=>Number((el as HTMLElement).style.zIndex));
+  const restoredSecondZ=await views.nth(1).evaluate(el=>Number((el as HTMLElement).style.zIndex));
+  expect(restoredFirstZ).toBeGreaterThan(restoredSecondZ);
   const restored=(await views.first().boundingBox())!;
   // Drag-end persistence is separate from the CAD document and must survive
   // reload without synchronous localStorage writes during pointermove.
