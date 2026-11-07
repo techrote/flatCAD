@@ -13,6 +13,8 @@ import { NAVIGATION_HINTS, NAVIGATION_LABELS, NAVIGATION_PRESETS, type Navigatio
 import type { KernelBuild, KernelHistoryFrame } from "./kernel-protocol";
 import { FeatureHistoryPanel } from "./history-panel";
 import { withoutCylinderSeams } from "./display-edges";
+import { ParameterManager } from "./parameter-panel";
+import { numericExpression,isNumericLiteral,unbindDirectEdits } from "./parameters";
 import { WorkspaceLayoutController } from "./workspace-layout";
 import { featureForSurface, formatSurfaceTarget, type SurfaceTarget } from "./surface-interaction";
 import { SketchCanvas, type SketchTool } from "./sketch-canvas-v2";
@@ -208,13 +210,23 @@ let generation=0,buildTimer:ReturnType<typeof setTimeout>|undefined;
 let slotRadius=3;
 
 const kernel=new KernelClient();
+const parameterManager=new ParameterManager(
+  document.querySelector<HTMLElement>(".inspector-drawer")!,
+  next=>change(next),
+  message=>status(message,true)
+);
 const historyPanel=new FeatureHistoryPanel(
   byId("feature-list"),
   feature=>safe(()=>updateFeature(feature)),
   feature=>safe(()=>change(validateDocument({
     ...doc,features:doc.features.filter(f=>f.id!==feature.id)
   }))),
-  (id,frame)=>inspectFeatureHistory(id,frame)
+  (id,frame)=>inspectFeatureHistory(id,frame),
+  (feature,field,raw)=>safe(()=>{
+    setBoundValue("feature:"+feature.id+":"+field,raw,value=>({
+      ...doc,features:doc.features.map(f=>f.id===feature.id?{...f,[field]:value}:f)
+    }));
+  })
 );
 /** History inspection is a viewport state, not an undoable document edit.
  *  When frames are loading we retain the current solid until an exact B-rep
@@ -372,7 +384,7 @@ function persistPreferences():void{
 }
 function change(next:CadDocument):void{
   historyPanel.clearSelection();
-  doc=validateDocument(next);
+  doc=validateDocument(unbindDirectEdits(doc,next));
   history=[...history.slice(0,historyIndex+1),doc].slice(-100);
   historyIndex=history.length-1;
   persistDocument();render();rebuild();
@@ -430,7 +442,7 @@ function render():void{
   button("undo").disabled=historyIndex===0;
   button("redo").disabled=historyIndex===history.length-1;
   byId("selection-bar").hidden=selectedIds.length===0;
-  renderProfileList();renderProperties();renderHistory();
+  renderProfileList();renderProperties();renderHistory();parameterManager.render(doc);
 }
 function numField(label:string,value:number,onChange:(x:number)=>void):HTMLLabelElement{
   const wrap=document.createElement("label");wrap.className="field";
@@ -444,9 +456,34 @@ function numField(label:string,value:number,onChange:(x:number)=>void):HTMLLabel
   });
   wrap.append(caption,box);return wrap;
 }
-function editProperty(profile:Profile,key:string,value:number):void{
-  const updated={...profile,[key]:value} as Profile;
-  change(updateProfile(doc,updated));
+/** A formula is stored alongside its exact evaluated numeric value. */
+function setBoundValue(target:string,raw:string,updated:(n:number)=>CadDocument):void{
+  const expression=raw.trim();
+  const value=numericExpression(expression,doc.parameters??[]);
+  const bindings=(doc.bindings??[]).filter(b=>b.target!==target);
+  if(!isNumericLiteral(expression))bindings.push({target,expression});
+  change(validateDocument({...updated(value),bindings}));
+}
+function boundField(label:string,value:number,target:string,
+  updated:(n:number)=>CadDocument):HTMLLabelElement{
+  const wrap=document.createElement("label");wrap.className="field bound-field";
+  const caption=document.createElement("span");caption.textContent=label;
+  const box=document.createElement("input");box.type="text";box.inputMode="decimal";
+  box.spellcheck=false;box.autocomplete="off";
+  const binding=doc.bindings?.find(b=>b.target===target);
+  box.value=binding?.expression??String(value);
+  box.dataset.bindingTarget=target;
+  box.dataset.expression=String(Boolean(binding));
+  box.title=binding?"="+value+" mm · linked formula":"Exact number or parameter expression";
+  box.setAttribute("aria-label",label);
+  box.onchange=()=>safe(()=>setBoundValue(target,box.value,updated));
+  wrap.append(caption,box);return wrap;
+}
+function boundProfileField(profile:Profile,key:string,label:string,value:number):HTMLLabelElement{
+  return boundField(label,value,"profile:"+profile.id+":"+key,n=>({
+    ...doc,profiles:doc.profiles.map(p=>p.id===profile.id?
+      {...p,[key]:n} as Profile:p)
+  }));
 }
 function renderProperties():void{
   const target=byId("inspector");target.replaceChildren();
@@ -461,7 +498,7 @@ function renderProperties():void{
   target.append(heading);
   const fields=document.createElement("div");fields.className="property-fields";
   const add=(key:string,value:number,label=key)=>{
-    fields.append(numField(label,value,n=>editProperty(p,key,n)));
+    fields.append(boundProfileField(p,key,label,value));
   };
   switch(p.kind){
     case "rectangle":add("x",p.x,"Left X");add("y",p.y,"Bottom Y");add("width",p.width);add("height",p.height);break;
@@ -472,12 +509,13 @@ function renderProperties():void{
       add("y2",p.y2,"End Y");add("radius",p.radius);break;
     case "path":{
       p.points.forEach((v,i)=>{
-        fields.append(numField("P"+(i+1)+" X",v.x,n=>{
-          const points=p.points.map((a,k)=>k===i?{...a,x:n}:a);change(updateProfile(doc,{...p,points}));
-        }));
-        fields.append(numField("P"+(i+1)+" Y",v.y,n=>{
-          const points=p.points.map((a,k)=>k===i?{...a,y:n}:a);change(updateProfile(doc,{...p,points}));
-        }));
+        for(const axis of ["x","y"] as const){
+          fields.append(boundField("P"+(i+1)+" "+axis.toUpperCase(),v[axis],
+            "profile:"+p.id+":points."+i+"."+axis,n=>{
+              const points=p.points.map((a,k)=>k===i?{...a,[axis]:n}:a);
+              return {...doc,profiles:doc.profiles.map(q=>q.id===p.id?{...p,points}:q)};
+            }));
+        }
       });
       const toggle=document.createElement("button");toggle.className="button";
       toggle.textContent=p.closed?"Open polyline":"Close polyline";
@@ -540,7 +578,11 @@ function removeSelected():void {
   const next=validateDocument({
     ...doc,
     profiles:doc.profiles.filter(p=>!removing.has(p.id)),
-    features:doc.features.filter(f=>!removing.has(f.profileId))
+    features:doc.features.filter(f=>!removing.has(f.profileId)),
+    bindings:doc.bindings?.filter(b=>!([...removing].some(id=>
+      b.target.startsWith("profile:"+id+":"))||
+      doc.features.some(f=>removing.has(f.profileId)&&
+        b.target.startsWith("feature:"+f.id+":"))))
   });
   selectedIds=[];selectedId=null;change(next);
 }
@@ -1013,7 +1055,8 @@ const MENU:Record<string,[string,string][]> = {
    ["Slot","tool.slot"],["Finish open line","line.finish"],["Close line outline","line.close"],
    ["Duplicate selected","edit.duplicate"],["Delete selected","edit.delete"],["Exact properties","view.properties"]],
  model:[["Extrude / Cut (Auto)","feature.extrude"],["Add extrusion","model.add"],
-   ["Subtract extrusion","model.cut"],["Feature history","view.history"]],
+   ["Subtract extrusion","model.cut"],["Feature history","view.history"],
+   ["Named parameters…","dialog.parameters"]],
  view:[["Pan","tool.pan"],["Fit Solid View","view.fit"],["Grid and snapping…","dialog.grid"],["Profile list","view.profiles"],
    ["Properties","view.properties"],["History","view.history"],["Workspace tiles…","dialog.layout"],["Current solid","view.now"]],
  settings:[["Keyboard shortcuts…","dialog.shortcuts"],["Grid and snapping…","dialog.grid"],
@@ -1066,6 +1109,7 @@ function command(action:string):void{
     case "dialog.navigation":showNavigation();break;
     case "dialog.text":showTextSettings();break;
     case "dialog.layout":showLayoutSettings();break;
+    case "dialog.parameters":closeMenu();parameterManager.open();break;
     case "view.now":historyPanel.clearSelection();break;
     case "prefs.export":exportSettings();break;
     case "prefs.import":input("settings-input").click();break;
@@ -1369,7 +1413,7 @@ document.addEventListener("keydown",event=>{
     }catch(error){byId("shortcut-error").textContent=String(error);}
     return;
   }
-  if(["shortcuts-dialog","grid-dialog","navigation-dialog","text-dialog","layout-dialog"].some(x=>dialog(x).open))return;
+  if(["shortcuts-dialog","grid-dialog","navigation-dialog","text-dialog","layout-dialog","parameters-dialog"].some(x=>dialog(x).open))return;
   if(!byId("extrude-flyout").hidden){
     if(event.code==="Escape"){event.preventDefault();closeExtrude();setTool("select");return;}
     if(event.code==="Enter"){event.preventDefault();applyExtrude();return;}
@@ -1395,7 +1439,7 @@ document.addEventListener("keydown",event=>{
 });
 document.addEventListener("keydown",event=>{
   if(event.code==="Space"&&!event.repeat&&!(event.target as HTMLElement).closest("input,textarea,select")&&
-    !["shortcuts-dialog","grid-dialog","navigation-dialog","text-dialog","layout-dialog"].some(x=>dialog(x).open)){
+    !["shortcuts-dialog","grid-dialog","navigation-dialog","text-dialog","layout-dialog","parameters-dialog"].some(x=>dialog(x).open)){
     if(activeTool!=="pan"){event.preventDefault();priorTool=activeTool;setTool("pan");}
   }
 });

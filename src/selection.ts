@@ -1,5 +1,6 @@
 import { isClosed, suggestOperation } from "./geometry";
 import { newId, validateDocument, type CadDocument, type Feature, type Profile } from "./model";
+import { unbindDirectEdits } from "./parameters";
 
 /** Ctrl/Command-click toggles membership, unmodified click preserves an existing group. */
 export function nextSelection(current: readonly string[], id: string | null, additive: boolean): string[] {
@@ -38,7 +39,7 @@ export function documentWithMovedProfiles(doc: CadDocument, edits: readonly Prof
   if (replacements.size !== edits.length || edits.some(p => !doc.profiles.some(q => q.id === p.id))) {
     throw new Error("Invalid group edit");
   }
-  return validateDocument({
+  return validateDocument(unbindDirectEdits(doc,{
     ...doc, profiles: doc.profiles.map(profile => replacements.get(profile.id) ?? profile),
-  });
+  }));
 }
