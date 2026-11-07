@@ -39,3 +39,26 @@ describe("pure XY geometry and edits",()=>{
     expect(suggestOperation(doc,{...p,id:"outer",radius:100})).toBe("add");
   });
 });
+
+import {rotateProfile,rotatePoint,outline as rotatedOutline} from "./geometry";
+describe("XY sketch rotation with dimensional provenance",()=>{
+  it("rotates a rectangle around its own centre, preserving width and height",()=>{
+    const rect={id:"r",kind:"rectangle" as const,x:0,y:0,width:20,height:10};
+    const r=rotateProfile(rect,90);
+    expect(r).toMatchObject({width:20,height:10,rotation:90});
+    const pts=rotatedOutline(r);
+    expect(pts[0].x).toBeCloseTo(15,7);
+    expect(pts[0].y).toBeCloseTo(-5,7);
+    expect(rotatedOutline(rect)[0]).toEqual({x:0,y:0});
+  });
+  it("rotates path vertices and slot endpoints without changing lengths",()=>{
+    const path={id:"p",kind:"path" as const,closed:true,
+      points:[{x:0,y:0},{x:10,y:0},{x:0,y:10}]};
+    const next=rotateProfile(path,45);
+    expect(next.kind).toBe("path");
+    expect(rotatedOutline(next)).toHaveLength(3);
+    const slot={id:"s",kind:"slot" as const,x1:0,y1:0,x2:10,y2:0,radius:2};
+    expect(rotateProfile(slot,90)).toMatchObject({x1:5,y1:-5,x2:5,y2:5,radius:2});
+    expect(rotatePoint({x:1,y:0},{x:0,y:0},90).y).toBeCloseTo(1);
+  });
+});

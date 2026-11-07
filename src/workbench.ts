@@ -74,6 +74,7 @@ root.innerHTML=[
   '          <button data-tool="polygon" title="Regular polygon (P)" class="rail-tool" aria-label="Polygon">⬡</button>',
   '          <button data-tool="slot" title="Slot (S)" class="rail-tool" aria-label="Slot">⬭</button>',
   '          <button data-tool="pan" title="Pan (M or middle mouse)" class="rail-tool" aria-label="Pan">✥</button>',
+  '          <button data-tool="rotate" title="Rotate sketch element (O)" class="rail-tool" aria-label="Rotate">⟳</button>',
   '          <span class="rail-divider"></span>',
   '          <button data-tool="extrude" title="Extrude / Cut (E)" class="rail-tool" aria-label="Extrude or cut">↥</button>',
   '        </div>',
@@ -466,7 +467,8 @@ function setTool(tool:SketchTool):void{
     polygon:"Click centre and drag · adjust sides and rotation above",
     slot:"Drag between end centres · set radius above",
     pan:"Drag to pan · wheel zooms at pointer",
-    extrude:"Click a closed profile to extrude or cut"
+    extrude:"Click a closed profile to extrude or cut",
+    rotate:"Drag around the selected element’s centre · Shift snaps 15°"
   };
   byId("canvas-hint").textContent=hint[tool];
   renderToolOptions();closeMenu();
@@ -553,7 +555,8 @@ function renderProperties():void{
     fields.append(boundProfileField(p,key,label,value));
   };
   switch(p.kind){
-    case "rectangle":add("x",p.x,"Left X");add("y",p.y,"Bottom Y");add("width",p.width);add("height",p.height);break;
+    case "rectangle":add("x",p.x,"Left X");add("y",p.y,"Bottom Y");add("width",p.width);
+      add("height",p.height);add("rotation",p.rotation??0,"Rotation °");break;
     case "circle":add("x",p.x,"Centre X");add("y",p.y,"Centre Y");add("radius",p.radius);break;
     case "polygon":add("x",p.x,"Centre X");add("y",p.y,"Centre Y");add("radius",p.radius);
       add("sides",p.sides);add("rotation",p.rotation,"Rotation °");break;
@@ -1135,7 +1138,7 @@ const MENU:Record<string,[string,string][]> = {
  sketch:[["Select","tool.select"],["Line / polyline","tool.line"],["Rectangle","tool.rectangle"],
    ["Centre rectangle","tool.centerRectangle"],["Circle","tool.circle"],["Regular polygon","tool.polygon"],
    ["Slot","tool.slot"],["Finish open line","line.finish"],["Close line outline","line.close"],
-   ["Duplicate selected","edit.duplicate"],["Delete selected","edit.delete"],["Exact properties","view.properties"]],
+   ["Rotate selected","tool.rotate"],["Duplicate selected","edit.duplicate"],["Delete selected","edit.delete"],["Exact properties","view.properties"]],
  model:[["Extrude / Cut (Auto)","feature.extrude"],["Add extrusion","model.add"],
    ["Subtract extrusion","model.cut"],["Feature history","view.history"],
    ["Named parameters…","dialog.parameters"]],

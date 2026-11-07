@@ -63,3 +63,13 @@ describe("Fit-view shortcut migration",()=>{
     expect(validatePreferences(old).shortcuts["tool.rectangle"]).toBe("KeyF");
   });
 });
+
+describe("rotate tool shortcut migration",()=>{
+  it("adds default O without erasing existing user preferences",()=>{
+    const old=defaultPreferences();
+    delete (old.shortcuts as Partial<typeof old.shortcuts>)["tool.rotate"];
+    expect(validatePreferences(old).shortcuts["tool.rotate"]).toBe("KeyO");
+    old.shortcuts["tool.pan"]="KeyO";
+    expect(validatePreferences(old).shortcuts["tool.rotate"]).toBe("");
+  });
+});
