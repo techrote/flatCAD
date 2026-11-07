@@ -82,3 +82,14 @@ The Solid camera maintains its azimuth/elevation, zoom and pan position across o
 Open the collapsed **Feature history** drawer to see one post-operation **OpenCascade B-rep-derived thumbnail** per feature. Captions are `Extrude · Rectangle 1`, `Cut · Circle 2`, etc. Cut thumbnail overlays the complete cutting tool in red, including Z overshoot. Thumbnails are generated separately from the primary Solid update and are not an alternative to exact source geometry. Large histories can take longer to generate.
 
 Only valid horizontal faces have the bright cyan hover overlay; side faces are not coloured. Actual CAD B-rep edge endpoints have a larger 17-pixel hover radius and an equally sized translucent green 3D sphere. These visual/topological coordinates do not create persistent CAD face/vertex references.
+
+
+## Resizable workspace and compact history tiles
+
+The Sketch/Solid separator and the Solid/inspector separator support pointer dragging, keyboard arrow adjustments when focused, and double-click to restore their defaults. Their positions are stored locally under a versioned UI-layout key, **not** in the engineering project. On narrower windows, the main divider changes to a vertical Sketch/Solid split; the sketch and solid viewports resize without losing their contents or camera.
+
+The toolbar can be **docked to the Sketch title bar** using the Dock toggle, or undocked into the floating vertical rail. All tools and shortcuts continue to work in either location; placement is remembered locally.
+
+Feature History now presents **newest-first, compact, multi-column tiles** showing the exact post-operation B-rep-derived snapshots (including red cutting-tool overlays). Clicking one tile opens a **single** contextual operation/Start Z/Depth/delete editor above the tiles. Clicking the same tile or its × button closes it. Editing one feature does not reorder the underlying CAD feature replay.
+
+The permanent bottom status bar and Sketch bottom strip are removed: **Undo/Redo, Grid, tool dock, zoom and profile count** live in the Sketch title bar, and the **exact B-rep volume plus a build-status indicator** live in the Solid title bar. Preview volume is explicitly marked; errors still appear as a contextual message while remaining available to assistive technology.
