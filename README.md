@@ -57,6 +57,7 @@ Geometric constraint solving, standalone arcs, automatic region extraction from 
 ## Documents
 
 - [Owner-approved product vision and agent design contract](docs/PRODUCT-VISION.md)
+- [Experimental named parameters and formula data model](docs/ADR-0007-NAMED-PARAMETERS.md)
 - [Canvas-first UX and shortcuts](docs/UX-DIRECT-INTERACTION.md)
 - [Architecture](docs/ARCHITECTURE.md)
 - [Roadmap](docs/ROADMAP.md)

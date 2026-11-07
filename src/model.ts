@@ -1,5 +1,7 @@
 /** Physical millimetres; never canvas pixels. Schema v2 accepts v1 migration. */
 import { isSimplePolygon, signedArea } from "./geometry";
+import {deriveBoundGeometry,validateBindings,validateDefinitions,unbindDirectEdits,
+  type NamedParameter,type ValueBinding} from "./parameters";
 export type Point2 = { x: number; y: number };
 export type Rectangle = { id:string; kind:"rectangle"; x:number; y:number; width:number; height:number };
 export type Circle = { id:string; kind:"circle"; x:number; y:number; radius:number };
@@ -9,7 +11,9 @@ export type SlotProfile = { id:string; kind:"slot"; x1:number; y1:number; x2:num
 export type Profile = Rectangle | Circle | PolygonProfile | PathProfile | SlotProfile;
 /** z is the start plane in mm; signed depth is the Z displacement to the end plane. */
 export type Feature = { id:string; profileId:string; operation:"add"|"cut"; z:number; depth:number };
-export type CadDocument = { schemaVersion:2; name:string; units:"mm"; profiles:Profile[]; features:Feature[] };
+export type CadDocument = { schemaVersion:2; name:string; units:"mm"; profiles:Profile[]; features:Feature[];
+  /** Optional v2-compatible exact named scalar formulas and numeric bindings. */
+  parameters?:NamedParameter[];bindings?:ValueBinding[]; };
 
 const LIMIT = 1_000_000;
 function failUnless(condition: unknown, message: string): asserts condition {
@@ -96,7 +100,19 @@ export function validateDocument(input: unknown): CadDocument {
       "invalid feature Z/depth (must be non-zero, signed and finite)");
     return { id: f.id, profileId: f.profileId, operation: f.operation, z: f.z, depth: f.depth };
   });
-  return { schemaVersion: 2, name: input.name, units: "mm", profiles, features };
+  const result:CadDocument={schemaVersion:2,name:input.name,units:"mm",profiles,features};
+  if(input.parameters!==undefined||input.bindings!==undefined){
+    if(input.schemaVersion===1)throw new Error("Invalid flatCAD document: formulas require v2");
+    if(input.parameters!==undefined)result.parameters=validateDefinitions(input.parameters);
+    if(input.bindings!==undefined)result.bindings=validateBindings(input.bindings);
+    const derived=deriveBoundGeometry(result);
+    // Re-run ALL exact numeric geometry constraints on evaluated values. The
+    // recursive call has no metadata, hence evaluates the ordinary v2 path once.
+    const checked=validateDocument({...derived,parameters:undefined,bindings:undefined});
+    return {...checked,...(result.parameters!==undefined?{parameters:result.parameters}:{}),
+      ...(result.bindings!==undefined?{bindings:result.bindings}:{})};
+  }
+  return result;
 }
 
 export const DEMO: CadDocument = validateDocument({
@@ -117,16 +133,27 @@ export function appendProfile(doc: CadDocument, profile: Profile): CadDocument {
   return validateDocument({ ...doc, profiles: [...doc.profiles, profile] });
 }
 export function updateProfile(doc: CadDocument, profile: Profile): CadDocument {
-  return validateDocument({ ...doc, profiles: doc.profiles.map(p => p.id === profile.id ? profile : p) });
+  const next={...doc,profiles:doc.profiles.map(p=>p.id===profile.id?profile:p)};
+  return validateDocument(unbindDirectEdits(doc,next));
 }
 export function deleteProfile(doc: CadDocument, id: string): CadDocument {
   return validateDocument({
     ...doc, profiles: doc.profiles.filter(p => p.id !== id),
-    features: doc.features.filter(f => f.profileId !== id)
+    features: doc.features.filter(f => f.profileId !== id),
+    bindings:doc.bindings?.filter(b=>!b.target.startsWith("profile:"+id+":")&&
+      !doc.features.some(f=>f.profileId===id&&b.target.startsWith("feature:"+f.id+":")))
   });
 }
 export function appendFeature(doc: CadDocument, feature: Feature): CadDocument {
   return validateDocument({ ...doc, features: [...doc.features, feature] });
+}
+/** Deleting an authored feature also detaches its exact-formula field bindings.
+ *  Keep the remaining formula graph and profile definitions untouched. */
+export function deleteFeature(doc:CadDocument,id:string):CadDocument{
+  return validateDocument({...doc,
+    features:doc.features.filter(f=>f.id!==id),
+    bindings:doc.bindings?.filter(b=>!b.target.startsWith("feature:"+id+":"))
+  });
 }
 export function newId(prefix: string): string {
   return prefix + "_" + crypto.randomUUID().replaceAll("-", "");

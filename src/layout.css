@@ -331,6 +331,23 @@
   .tool-dock-slot{max-width:calc(100vw - 95px)}
 }
 
+
+/* Named-parameter manager is only visible when explicitly opened. */
+.parameter-rows{display:grid;gap:9px}
+.parameter-row{display:grid;grid-template-columns:minmax(80px,.8fr) minmax(125px,1.4fr) 94px 28px;
+  gap:8px;align-items:center;padding:4px 0}
+.parameter-row input{width:100%;min-width:0;background:#0b1829;color:#dcecff;
+  border:1px solid #426482;border-radius:5px;padding:8px;font:12px ui-monospace,monospace}
+.parameter-row output{font:11px ui-monospace,monospace;color:#b7d9ed;text-align:right}
+.parameter-summary{display:grid;gap:4px;padding-bottom:9px}
+.parameter-summary-row{display:flex;gap:12px;justify-content:space-between;
+  font:11px ui-monospace,monospace;color:#a4c2d8}
+.parameter-summary-row strong{color:#e4eefa}
+.bound-field input[data-expression="true"],.history-feature-editor input[data-expression="true"]{
+  color:#b7efcf;border-color:#458975;
+}
+@media(max-width:720px){.parameter-row{grid-template-columns:1fr 1.4fr 65px 28px;gap:4px}}
+
 @media(orientation:landscape) and (min-width:1101px){
   .workbench .workbench-layout.three-tiles{
     grid-template-rows:minmax(0,1fr) 134px;

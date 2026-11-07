@@ -21,6 +21,11 @@ export class FeatureHistoryPanel {
     private readonly onUpdate:(feature:Feature)=>void,
     private readonly onDelete:(feature:Feature)=>void,
     private readonly onInspect:(id:string|null,frame:KernelHistoryFrame|null)=>void=()=>{},
+    private readonly onFormula:(feature:Feature,field:"z"|"depth",raw:string)=>void=
+      (feature,field,raw)=>{
+        const n=Number(raw);
+        if(Number.isFinite(n))this.onUpdate({...feature,[field]:n});
+      },
   ){}
   /** Clear historical inspection without mutating the editable CAD feature list. */
   clearSelection():void{
@@ -172,10 +177,12 @@ export class FeatureHistoryPanel {
     }
     mode.onchange=()=>this.onUpdate({...feature,operation:mode.value as "add"|"cut"});
     fields.append(mode);
-    fields.append(this.numberField("Start Z",feature.z,value=>
-      this.onUpdate({...feature,z:value})));
-    fields.append(this.numberField("Depth",feature.depth,value=>
-      this.onUpdate({...feature,depth:value})));
+    fields.append(this.numberField("Start Z",feature.z,raw=>
+      this.onFormula(feature,"z",raw),
+      doc.bindings?.find(b=>b.target==="feature:"+id+":z")?.expression));
+    fields.append(this.numberField("Depth",feature.depth,raw=>
+      this.onFormula(feature,"depth",raw),
+      doc.bindings?.find(b=>b.target==="feature:"+id+":depth")?.expression));
     const actions=document.createElement("div");
     actions.className="history-editor-actions";
     const volume=this.lastFrames?.find(frame=>frame.featureId===id);
@@ -196,18 +203,18 @@ export class FeatureHistoryPanel {
     panel.append(header,fields,actions);
   }
 
-  private numberField(label:string,value:number,onChange:(next:number)=>void):HTMLLabelElement{
+  private numberField(label:string,value:number,onChange:(raw:string)=>void,
+    expression?:string):HTMLLabelElement{
     const wrap=document.createElement("label");wrap.className="field";
     const caption=document.createElement("span");caption.textContent=label;
     const input=document.createElement("input");
-    input.type="number";input.step="any";input.value=String(value);
+    input.type="text";input.inputMode="decimal";input.value=expression??String(value);
+    input.dataset.expression=String(Boolean(expression));
+    input.title=expression?"="+value+" mm · linked formula":"Number or named parameter";
     input.setAttribute("aria-label",label);
     input.onchange=()=>{
-      const next=Number(input.value);
-      if(!input.value.trim()||!Number.isFinite(next)){
-        input.value=String(value);return;
-      }
-      onChange(next);
+      if(!input.value.trim()){input.value=expression??String(value);return;}
+      onChange(input.value);
     };
     wrap.append(caption,input);
     return wrap;

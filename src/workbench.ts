@@ -2,7 +2,7 @@ import "./styles.css";
 import "./workbench.css";
 import "./layout.css";
 import {
-  DEMO, appendFeature, appendProfile, deleteProfile, newId, updateProfile, validateDocument,
+  DEMO, appendFeature, appendProfile, deleteFeature, deleteProfile, newId, updateProfile, validateDocument,
   type CadDocument, type Feature, type Profile, type Point2
 } from "./model";
 import { isClosed, translate } from "./geometry";
@@ -13,6 +13,8 @@ import { NAVIGATION_HINTS, NAVIGATION_LABELS, NAVIGATION_PRESETS, type Navigatio
 import type { KernelBuild, KernelHistoryFrame } from "./kernel-protocol";
 import { FeatureHistoryPanel } from "./history-panel";
 import { withoutCylinderSeams } from "./display-edges";
+import { ParameterManager } from "./parameter-panel";
+import { numericExpression,isNumericLiteral,unbindDirectEdits } from "./parameters";
 import { WorkspaceLayoutController } from "./workspace-layout";
 import { featureForSurface, formatSurfaceTarget, type SurfaceTarget } from "./surface-interaction";
 import { SketchCanvas, type SketchTool } from "./sketch-canvas-v2";
@@ -86,8 +88,8 @@ root.innerHTML=[
   '          <div class="flyout-head"><strong>Extrude</strong><button id="cancel-extrude" aria-label="Cancel extrusion">×</button></div>',
   '          <div id="extrude-target" class="flyout-subtitle"></div>',
   '          <label class="field"><span>Operation</span><select id="extrude-mode"><option value="auto">Auto</option><option value="add">Add / Join</option><option value="cut">Cut</option></select></label>',
-  '          <div class="field-row"><label class="field"><span>Start Z · mm</span><input type="number" step="any" id="extrude-z" value="0" title="Click a horizontal face in Solid view to fill Start Z"></label>',
-  '            <label class="field"><span>Depth · mm</span><input type="number" step="any" id="extrude-depth" value="8" title="Signed depth: negative extrudes down; click a horizontal face for a target elevation"></label></div>',
+  '          <div class="field-row"><label class="field"><span>Start Z · mm</span><input type="text" inputmode="decimal" id="extrude-z" value="0" title="Click a horizontal face in Solid view to fill Start Z"></label>',
+  '            <label class="field"><span>Depth · mm</span><input type="text" inputmode="decimal" id="extrude-depth" value="8" title="Signed depth: negative extrudes down; click a horizontal face for a target elevation"></label></div>',
   '          <label class="check through-all"><input type="checkbox" id="extrude-through"> Through all (cut)</label>',
   '          <label class="check live-preview"><input type="checkbox" id="extrude-preview" checked> Preview in solid view</label>',
   '          <div class="flyout-face-hint">ⓘ Click a horizontal face in Solid view to fill the last-focused <strong>Start Z</strong> or <strong>Depth</strong> field.</div>',
@@ -208,13 +210,21 @@ let generation=0,buildTimer:ReturnType<typeof setTimeout>|undefined;
 let slotRadius=3;
 
 const kernel=new KernelClient();
+const parameterManager=new ParameterManager(
+  document.querySelector<HTMLElement>(".inspector-drawer")!,
+  next=>change(next),
+  message=>status(message,true)
+);
 const historyPanel=new FeatureHistoryPanel(
   byId("feature-list"),
   feature=>safe(()=>updateFeature(feature)),
-  feature=>safe(()=>change(validateDocument({
-    ...doc,features:doc.features.filter(f=>f.id!==feature.id)
-  }))),
-  (id,frame)=>inspectFeatureHistory(id,frame)
+  feature=>safe(()=>change(deleteFeature(doc,feature.id))),
+  (id,frame)=>inspectFeatureHistory(id,frame),
+  (feature,field,raw)=>safe(()=>{
+    setBoundValue("feature:"+feature.id+":"+field,raw,value=>({
+      ...doc,features:doc.features.map(f=>f.id===feature.id?{...f,[field]:value}:f)
+    }));
+  })
 );
 /** History inspection is a viewport state, not an undoable document edit.
  *  When frames are loading we retain the current solid until an exact B-rep
@@ -375,7 +385,7 @@ function persistPreferences():void{
 }
 function change(next:CadDocument):void{
   historyPanel.clearSelection();
-  doc=validateDocument(next);
+  doc=validateDocument(unbindDirectEdits(doc,next));
   history=[...history.slice(0,historyIndex+1),doc].slice(-100);
   historyIndex=history.length-1;
   persistDocument();render();rebuild();
@@ -433,7 +443,7 @@ function render():void{
   button("undo").disabled=historyIndex===0;
   button("redo").disabled=historyIndex===history.length-1;
   byId("selection-bar").hidden=selectedIds.length===0;
-  renderProfileList();renderProperties();renderHistory();
+  renderProfileList();renderProperties();renderHistory();parameterManager.render(doc);
 }
 function numField(label:string,value:number,onChange:(x:number)=>void):HTMLLabelElement{
   const wrap=document.createElement("label");wrap.className="field";
@@ -447,9 +457,34 @@ function numField(label:string,value:number,onChange:(x:number)=>void):HTMLLabel
   });
   wrap.append(caption,box);return wrap;
 }
-function editProperty(profile:Profile,key:string,value:number):void{
-  const updated={...profile,[key]:value} as Profile;
-  change(updateProfile(doc,updated));
+/** A formula is stored alongside its exact evaluated numeric value. */
+function setBoundValue(target:string,raw:string,updated:(n:number)=>CadDocument):void{
+  const expression=raw.trim();
+  const value=numericExpression(expression,doc.parameters??[]);
+  const bindings=(doc.bindings??[]).filter(b=>b.target!==target);
+  if(!isNumericLiteral(expression))bindings.push({target,expression});
+  change(validateDocument({...updated(value),bindings}));
+}
+function boundField(label:string,value:number,target:string,
+  updated:(n:number)=>CadDocument):HTMLLabelElement{
+  const wrap=document.createElement("label");wrap.className="field bound-field";
+  const caption=document.createElement("span");caption.textContent=label;
+  const box=document.createElement("input");box.type="text";box.inputMode="decimal";
+  box.spellcheck=false;box.autocomplete="off";
+  const binding=doc.bindings?.find(b=>b.target===target);
+  box.value=binding?.expression??String(value);
+  box.dataset.bindingTarget=target;
+  box.dataset.expression=String(Boolean(binding));
+  box.title=binding?"="+value+" mm · linked formula":"Exact number or parameter expression";
+  box.setAttribute("aria-label",label);
+  box.onchange=()=>safe(()=>setBoundValue(target,box.value,updated));
+  wrap.append(caption,box);return wrap;
+}
+function boundProfileField(profile:Profile,key:string,label:string,value:number):HTMLLabelElement{
+  return boundField(label,value,"profile:"+profile.id+":"+key,n=>({
+    ...doc,profiles:doc.profiles.map(p=>p.id===profile.id?
+      {...p,[key]:n} as Profile:p)
+  }));
 }
 function renderProperties():void{
   const target=byId("inspector");target.replaceChildren();
@@ -464,7 +499,7 @@ function renderProperties():void{
   target.append(heading);
   const fields=document.createElement("div");fields.className="property-fields";
   const add=(key:string,value:number,label=key)=>{
-    fields.append(numField(label,value,n=>editProperty(p,key,n)));
+    fields.append(boundProfileField(p,key,label,value));
   };
   switch(p.kind){
     case "rectangle":add("x",p.x,"Left X");add("y",p.y,"Bottom Y");add("width",p.width);add("height",p.height);break;
@@ -475,12 +510,13 @@ function renderProperties():void{
       add("y2",p.y2,"End Y");add("radius",p.radius);break;
     case "path":{
       p.points.forEach((v,i)=>{
-        fields.append(numField("P"+(i+1)+" X",v.x,n=>{
-          const points=p.points.map((a,k)=>k===i?{...a,x:n}:a);change(updateProfile(doc,{...p,points}));
-        }));
-        fields.append(numField("P"+(i+1)+" Y",v.y,n=>{
-          const points=p.points.map((a,k)=>k===i?{...a,y:n}:a);change(updateProfile(doc,{...p,points}));
-        }));
+        for(const axis of ["x","y"] as const){
+          fields.append(boundField("P"+(i+1)+" "+axis.toUpperCase(),v[axis],
+            "profile:"+p.id+":points."+i+"."+axis,n=>{
+              const points=p.points.map((a,k)=>k===i?{...a,[axis]:n}:a);
+              return {...doc,profiles:doc.profiles.map(q=>q.id===p.id?{...p,points}:q)};
+            }));
+        }
       });
       const toggle=document.createElement("button");toggle.className="button";
       toggle.textContent=p.closed?"Open polyline":"Close polyline";
@@ -547,7 +583,11 @@ function removeSelected():void {
   const next=validateDocument({
     ...doc,
     profiles:doc.profiles.filter(p=>!removing.has(p.id)),
-    features:doc.features.filter(f=>!removing.has(f.profileId))
+    features:doc.features.filter(f=>!removing.has(f.profileId)),
+    bindings:doc.bindings?.filter(b=>!([...removing].some(id=>
+      b.target.startsWith("profile:"+id+":"))||
+      doc.features.some(f=>removing.has(f.profileId)&&
+        b.target.startsWith("feature:"+f.id+":"))))
   });
   selectedIds=[];selectedId=null;change(next);
 }
@@ -674,6 +714,10 @@ function throughAllBounds():[number,number] {
   }
   return [-1,9];
 }
+function extrusionNumbers():{z:number,depth:number}{
+  return {z:numericExpression(input("extrude-z").value,doc.parameters??[]),
+    depth:numericExpression(input("extrude-depth").value,doc.parameters??[])};
+}
 function resolveMode(): "add" | "cut" {
   const manual=select("extrude-mode").value;
   if(manual==="add"||manual==="cut")return manual;
@@ -717,10 +761,9 @@ function fillFocusedFieldFromFace(z:number|null):void {
   if(facePickField==="z"){
     field.value=String(z);
   }else{
-    const start=Number(input("extrude-z").value);
-    if(!Number.isFinite(start)){
-      status("Enter a valid Start Z before picking target Depth",true);return;
-    }
+    let start:number;
+    try{start=numericExpression(input("extrude-z").value,doc.parameters??[]);}
+    catch{status("Enter a valid Start Z before picking target Depth",true);return;}
     const signed=depthToFace(start,z);
     if(signed===0){
       status("Target face is level with Start Z: depth cannot be zero",true);return;
@@ -728,7 +771,9 @@ function fillFocusedFieldFromFace(z:number|null):void {
     field.value=String(signed);
   }
   input("extrude-through").checked=false;
-  const depth=Number(input("extrude-depth").value);
+  let depth=0;
+  try{depth=numericExpression(input("extrude-depth").value,doc.parameters??[]);}
+  catch{/* Retain last valid arrow while the text expression is being edited. */}
   if(extrudeTarget&&Number.isFinite(depth)&&depth!==0)
     canvas.setExtrudeHandle({id:extrudeTarget,depth});
   const host=byId("preview");
@@ -846,7 +891,9 @@ function scheduleOperationPreview():void {
   delete host.dataset.previewVolumeMm3;
   delete host.dataset.previewOperation;
   const source=doc,ids=[...extrudeTargets],mode=resolveMode();
-  const z=Number(input("extrude-z").value),depth=Number(input("extrude-depth").value);
+  let z=NaN,depth=NaN;
+  try{({z,depth}=extrusionNumbers());}
+  catch{/* Show validation in provisional preview, never mutate the document. */}
   previewTimer=setTimeout(async()=>{
     if(token!==previewToken)return;
     let candidate:CadDocument;
@@ -978,13 +1025,23 @@ function openExtrude(id?:string,operation?:"add"|"cut",at?:Point2):void {
 function applyExtrude():void {
   if(!extrudeTargets.length)return;
   const mode=resolveMode();
-  const z=Number(input("extrude-z").value),depth=Number(input("extrude-depth").value);
+  const zExpr=input("extrude-z").value.trim(),depthExpr=input("extrude-depth").value.trim();
   const ids=[...extrudeTargets];
   safe(()=>{
-    // One atomic document-history step for an arbitrary Ctrl-selected group.
+    const {z,depth}=extrusionNumbers();
+    // One atomic history action; bind the new exact scalar values to formulas.
     const result=documentWithExtrusions(doc,ids,mode,z,depth);
+    const newFeatures=result.features.slice(doc.features.length);
+    const bindings=[...(result.bindings??[])];
+    for(const feature of newFeatures){
+      if(!isNumericLiteral(zExpr))
+        bindings.push({target:"feature:"+feature.id+":z",expression:zExpr});
+      if(!isNumericLiteral(depthExpr))
+        bindings.push({target:"feature:"+feature.id+":depth",expression:depthExpr});
+    }
+    const bound=validateDocument({...result,bindings});
     closeExtrude();
-    change(result);
+    change(bound);
     setTool("select");
   });
 }
@@ -1029,7 +1086,8 @@ const MENU:Record<string,[string,string][]> = {
    ["Slot","tool.slot"],["Finish open line","line.finish"],["Close line outline","line.close"],
    ["Duplicate selected","edit.duplicate"],["Delete selected","edit.delete"],["Exact properties","view.properties"]],
  model:[["Extrude / Cut (Auto)","feature.extrude"],["Add extrusion","model.add"],
-   ["Subtract extrusion","model.cut"],["Feature history","view.history"]],
+   ["Subtract extrusion","model.cut"],["Feature history","view.history"],
+   ["Named parameters…","dialog.parameters"]],
  view:[["Pan","tool.pan"],["Fit Solid View","view.fit"],["Grid and snapping…","dialog.grid"],["Profile list","view.profiles"],
    ["Properties","view.properties"],["History","view.history"],["Workspace tiles…","dialog.layout"],["Current solid","view.now"]],
  settings:[["Keyboard shortcuts…","dialog.shortcuts"],["Grid and snapping…","dialog.grid"],
@@ -1082,6 +1140,7 @@ function command(action:string):void{
     case "dialog.navigation":showNavigation();break;
     case "dialog.text":showTextSettings();break;
     case "dialog.layout":showLayoutSettings();break;
+    case "dialog.parameters":closeMenu();parameterManager.open();break;
     case "view.now":historyPanel.clearSelection();break;
     case "prefs.export":exportSettings();break;
     case "prefs.import":input("settings-input").click();break;
@@ -1321,12 +1380,14 @@ input("extrude-through").onchange=()=>{
     const [min,max]=throughAllBounds();
     input("extrude-z").value=String(min);input("extrude-depth").value=String(max-min);
   }
-  canvas.setExtrudeHandle({id:extrudeTarget||"",depth:Number(input("extrude-depth").value)||8});
+  canvas.setExtrudeHandle({id:extrudeTarget||"",depth:extrusionNumbers().depth||8});
   scheduleOperationPreview();
 };
 input("extrude-depth").oninput=()=>{
   if(!extrudeTarget)return;
-  const depth=Number(input("extrude-depth").value);
+  let depth=NaN;
+  try{depth=numericExpression(input("extrude-depth").value,doc.parameters??[]);}
+  catch{/* Editing a partial formula must not throw during pointer feedback. */}
   input("extrude-through").checked=false;
   // Never silently rewrite an explicit/face-picked start plane.
   if(Number.isFinite(depth)&&depth!==0)
@@ -1385,7 +1446,7 @@ document.addEventListener("keydown",event=>{
     }catch(error){byId("shortcut-error").textContent=String(error);}
     return;
   }
-  if(["shortcuts-dialog","grid-dialog","navigation-dialog","text-dialog","layout-dialog"].some(x=>dialog(x).open))return;
+  if(["shortcuts-dialog","grid-dialog","navigation-dialog","text-dialog","layout-dialog","parameters-dialog"].some(x=>dialog(x).open))return;
   if(!byId("extrude-flyout").hidden){
     if(event.code==="Escape"){event.preventDefault();closeExtrude();setTool("select");return;}
     if(event.code==="Enter"){event.preventDefault();applyExtrude();return;}
@@ -1411,7 +1472,7 @@ document.addEventListener("keydown",event=>{
 });
 document.addEventListener("keydown",event=>{
   if(event.code==="Space"&&!event.repeat&&!(event.target as HTMLElement).closest("input,textarea,select")&&
-    !["shortcuts-dialog","grid-dialog","navigation-dialog","text-dialog","layout-dialog"].some(x=>dialog(x).open)){
+    !["shortcuts-dialog","grid-dialog","navigation-dialog","text-dialog","layout-dialog","parameters-dialog"].some(x=>dialog(x).open)){
     if(activeTool!=="pan"){event.preventDefault();priorTool=activeTool;setTool("pan");}
   }
 });
