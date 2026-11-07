@@ -412,3 +412,27 @@
 @media(min-width:1101px){
   .workbench-layout.float-solid .workbench-side{display:grid}
 }
+
+/* A floating render is a transparent bounded viewport; the subtle edge
+ * explains clipping, and the corner tile provides recovery and navigation.
+ * Controls remain pointer-accessible over transparent rendered pixels. */
+.workbench-layout.float-solid .preview-panel{
+  border:1px solid rgba(115,166,204,.65);
+  border-radius:8px;
+  box-shadow:0 0 0 1px rgba(7,22,36,.35),0 7px 19px #04121e50;
+}
+.float-nav{display:none;position:absolute;right:4px;top:4px;
+  z-index:40;gap:2px;padding:3px;background:#14283bc9;
+  border:1px solid #4e7495;border-radius:7px;
+  backdrop-filter:blur(5px);pointer-events:auto}
+.workbench-layout.float-solid .preview-panel .float-nav{display:flex}
+.float-nav-action{width:27px;height:27px;min-width:27px;
+  display:grid;place-items:center;background:transparent;
+  border:1px solid transparent;border-radius:4px;
+  color:#c9e3f9;cursor:pointer;pointer-events:auto;padding:3px}
+.float-nav-action:hover,.float-nav-action:focus-visible{
+  background:#315676;border-color:#85b8e2;color:#fff}
+.float-nav-action svg{width:19px;height:19px;pointer-events:none}
+.render-effect-option{margin:8px 0 19px}
+#render-supersampling{width:100%;padding:10px;
+  color:#e6f3ff;background:#112740;border:1px solid #436b8c;border-radius:5px}
