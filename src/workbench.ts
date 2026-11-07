@@ -15,6 +15,7 @@ import { FeatureHistoryPanel } from "./history-panel";
 import { withoutCylinderSeams } from "./display-edges";
 import { ParameterManager } from "./parameter-panel";
 import { numericExpression,isNumericLiteral,unbindDirectEdits } from "./parameters";
+import { installNumericWheel } from "./wheel-fields";
 import { WorkspaceLayoutController } from "./workspace-layout";
 import { featureForSurface, formatSurfaceTarget, type SurfaceTarget } from "./surface-interaction";
 import { SketchCanvas, type SketchTool } from "./sketch-canvas-v2";
@@ -149,7 +150,7 @@ root.innerHTML=[
   '  <label class="field"><span>Weight</span><select id="sketch-font-weight" aria-label="Sketch font weight"><option value="400">Regular</option><option value="500">Medium</option><option value="600">Semibold</option><option value="700">Bold</option></select></label></div>',
   '  <footer><button id="sketch-text-reset" class="button">Reset sketch text</button><button data-close="text-dialog" class="button primary">Done</button></footer></dialog>',
   '<dialog id="layout-dialog" class="settings-dialog"><div class="dialog-head"><div><strong>Workspace tiles</strong><small>Rearrange the existing controls without changing CAD data</small></div><button data-close="layout-dialog">×</button></div>',
-  '  <div class="dialog-scroll"><label class="field"><span>Desktop layout</span><select id="tile-mode"><option value="split">Sketch + Solid with inspector below</option><option value="columns">Three adjustable columns</option></select></label>',
+  '  <div class="dialog-scroll"><label class="field"><span>Desktop layout</span><select id="tile-mode"><option value="split">Sketch + Solid with inspector below</option><option value="columns">Three adjustable columns</option><option value="float">Float — transparent draggable solid</option></select></label>',
   '  <div id="tile-order" class="tile-order" aria-label="Tile arrangement"></div></div>',
   '  <footer><button id="tile-reset" class="button">Reset workspace</button><button data-close="layout-dialog" class="button primary">Done</button></footer></dialog>'
 ].join("\n");
@@ -215,6 +216,9 @@ const parameterManager=new ParameterManager(
   next=>change(next),
   message=>status(message,true)
 );
+let historyCutTimer:ReturnType<typeof setTimeout>|undefined;
+let historyCutToken=0;
+const HISTORY_CUT_FLASH_MS=867;
 const historyPanel=new FeatureHistoryPanel(
   byId("feature-list"),
   feature=>safe(()=>updateFeature(feature)),
@@ -232,6 +236,9 @@ const historyPanel=new FeatureHistoryPanel(
  */
 function inspectFeatureHistory(id:string|null,frame:KernelHistoryFrame|null):void{
   const host=byId("preview");
+  ++historyCutToken;
+  clearTimeout(historyCutTimer);
+  delete host.dataset.historyCutOverlay;
   if(!id){
     delete host.dataset.historyFeatureId;
     delete host.dataset.historyFeatureCount;
@@ -248,8 +255,23 @@ function inspectFeatureHistory(id:string|null,frame:KernelHistoryFrame|null):voi
     return;
   }
   if(extrudeTargets.length)closeExtrude();
-  preview?.setMesh(withoutCylinderSeams(frame.mesh,doc),{preserveCamera:true});
+  const mesh=withoutCylinderSeams(frame.mesh,doc);
+  const showCut=frame.operation==="cut"&&Boolean(frame.cutTool?.mesh?.triangles.length);
+  preview?.setMesh(mesh,{preserveCamera:true,
+    ...(showCut?{pending:"cut" as const,cutTool:frame.cutTool!.mesh}:{})});
   preview?.setHistoryInspection(true);
+  if(showCut){
+    const token=historyCutToken,featureId=id;
+    host.dataset.historyCutOverlay="true";
+    // Display-only, exact B-rep cutter transparency for precisely 867ms.
+    // Timer cancellation prevents old frames flashing over a newer selection.
+    historyCutTimer=setTimeout(()=>{
+      if(token!==historyCutToken||host.dataset.historyFeatureId!==featureId)return;
+      preview?.setMesh(mesh,{preserveCamera:true});
+      preview?.setHistoryInspection(true);
+      delete host.dataset.historyCutOverlay;
+    },HISTORY_CUT_FLASH_MS);
+  }
   const index=doc.features.findIndex(f=>f.id===id);
   byId("timeline-indicator").textContent="After feature "+(index+1)+" of "+doc.features.length;
   host.dataset.historyFeatureId=id;
@@ -302,18 +324,43 @@ function changeToolDock(docked:boolean):void{
 const workspaceLayout=new WorkspaceLayoutController(
   byId("workbench-layout"),byId("workbench-side"),
   byId("main-resizer"),byId("side-resizer"),changeToolDock,
-  ()=>requestAnimationFrame(positionDockCluster)
+  ()=>{
+    requestAnimationFrame(positionDockCluster);
+    requestAnimationFrame(positionFloatingPanel);
+  }
 );
+function positionFloatingPanel():void{
+  const panel=document.querySelector<HTMLElement>(".preview-panel");
+  if(!panel)return;
+  const enabled=workspaceLayout.tileMode==="float";
+  const {x,y}=workspaceLayout.floatingPosition;
+  if(enabled){
+    panel.style.left=Math.round(x*Math.max(0,window.innerWidth-panel.offsetWidth))+"px";
+    panel.style.top=Math.round(y*Math.max(0,window.innerHeight-panel.offsetHeight))+"px";
+  }else{
+    panel.style.removeProperty("left");
+    panel.style.removeProperty("top");
+  }
+  preview?.setFloating(enabled);
+}
+/** Keep the anchor at the same titlebar X when the toolbar is moved to it.
+ *  Reserve room for all buttons *before* docking to avoid hidden tools. */
+function dockAnchorTravel():number{
+  const title=byId("tool-dock-cluster").parentElement!;
+  const label=title.querySelector<HTMLElement>(".header-label")!;
+  const actions=title.querySelector<HTMLElement>(".sketch-title-actions")!;
+  const count=byId("sketch-tool-rail").querySelectorAll("[data-tool]").length;
+  const fullToolbarWidth=count*30+18;
+  return Math.max(0,title.clientWidth-label.offsetWidth-
+    actions.offsetWidth-fullToolbarWidth-29-28);
+}
 /** Dragging the anchor changes only its available flex spacing; the sketch
  * title and right-side commands remain visible rather than being overlapped. */
 function positionDockCluster():void{
   const title=byId("tool-dock-cluster").parentElement!;
   const cluster=byId("tool-dock-cluster");
   const label=title.querySelector<HTMLElement>(".header-label")!;
-  const actions=title.querySelector<HTMLElement>(".sketch-title-actions")!;
-  const free=Math.max(0,title.clientWidth-label.offsetWidth-
-    actions.offsetWidth-cluster.offsetWidth-28);
-  cluster.style.marginLeft=Math.round(free*workspaceLayout.dockX)+"px";
+  cluster.style.marginLeft=Math.round(dockAnchorTravel()*workspaceLayout.dockX)+"px";
   cluster.dataset.dockX=String(workspaceLayout.dockX);
 }
 new ResizeObserver(()=>positionDockCluster()).observe(byId("tool-dock-cluster").parentElement!);
@@ -321,12 +368,7 @@ let wasDockDrag=false;
 const dockAnchor=button("tool-dock-toggle");
 dockAnchor.addEventListener("pointerdown",event=>{
   if(event.button!==0)return;
-  const title=dockAnchor.closest<HTMLElement>(".sketch-titlebar")!;
-  const cluster=byId("tool-dock-cluster");
-  const label=title.querySelector<HTMLElement>(".header-label")!;
-  const actions=title.querySelector<HTMLElement>(".sketch-title-actions")!;
-  const free=Math.max(1,title.clientWidth-label.offsetWidth-
-    actions.offsetWidth-cluster.offsetWidth-28);
+  const free=Math.max(1,dockAnchorTravel());
   const startX=event.clientX,start=workspaceLayout.dockX;
   let dragged=false;
   dockAnchor.setPointerCapture(event.pointerId);
@@ -361,6 +403,15 @@ try{
   });
   preview.setSurfaceHoverHandler((target,pointer)=>updateSurfaceLabel(target,pointer));
   preview.setSurfaceMenuHandler((target,pointer)=>showSurfaceContext(target,pointer));
+  preview.setFloatDragHandler((dx,dy)=>{
+    const panel=document.querySelector<HTMLElement>(".preview-panel")!;
+    const {x,y}=workspaceLayout.floatingPosition;
+    const maxX=Math.max(1,window.innerWidth-panel.offsetWidth);
+    const maxY=Math.max(1,window.innerHeight-panel.offsetHeight);
+    workspaceLayout.setFloatPosition(x+dx/maxX,y+dy/maxY);
+  });
+  preview.setFloating(workspaceLayout.tileMode==="float");
+  requestAnimationFrame(positionFloatingPanel);
 }catch(error){
   byId("preview").textContent="3D preview unavailable; sketching and STEP export remain available";
   status(String(error),true);
@@ -1089,7 +1140,8 @@ const MENU:Record<string,[string,string][]> = {
    ["Subtract extrusion","model.cut"],["Feature history","view.history"],
    ["Named parameters…","dialog.parameters"]],
  view:[["Pan","tool.pan"],["Fit Solid View","view.fit"],["Grid and snapping…","dialog.grid"],["Profile list","view.profiles"],
-   ["Properties","view.properties"],["History","view.history"],["Workspace tiles…","dialog.layout"],["Current solid","view.now"]],
+   ["Properties","view.properties"],["History","view.history"],["Workspace tiles…","dialog.layout"],
+   ["Float solid","view.float"],["Dock solid","view.dock"],["Current solid","view.now"]],
  settings:[["Keyboard shortcuts…","dialog.shortcuts"],["Grid and snapping…","dialog.grid"],
    ["Sketch text…","dialog.text"],["Workspace tiles…","dialog.layout"],
    ["CAD navigation controls…","dialog.navigation"],
@@ -1142,6 +1194,8 @@ function command(action:string):void{
     case "dialog.layout":showLayoutSettings();break;
     case "dialog.parameters":closeMenu();parameterManager.open();break;
     case "view.now":historyPanel.clearSelection();break;
+    case "view.float":workspaceLayout.setTileMode("float");break;
+    case "view.dock":workspaceLayout.setTileMode("split");break;
     case "prefs.export":exportSettings();break;
     case "prefs.import":input("settings-input").click();break;
     case "prefs.remember":
@@ -1344,7 +1398,7 @@ button("tool-dock-toggle").onclick=()=>{
 button("tool-dock-float").onclick=()=>workspaceLayout.setDocked(true);
 button("timeline-now").onclick=()=>historyPanel.clearSelection();
 select("tile-mode").onchange=()=>{
-  workspaceLayout.setTileMode(select("tile-mode").value as "split"|"columns");
+  workspaceLayout.setTileMode(select("tile-mode").value as "split"|"columns"|"float");
 };
 button("tile-reset").onclick=()=>{
   workspaceLayout.resetArrangement();select("tile-mode").value=workspaceLayout.tileMode;
@@ -1504,8 +1558,11 @@ function placeHistoryTimeline():void{
     ensureHistoryThumbnails();
 }
 window.addEventListener("resize",()=>{
-  positionExtrudeMenu();placeHistoryTimeline();requestAnimationFrame(positionDockCluster);
+  positionExtrudeMenu();placeHistoryTimeline();
+  requestAnimationFrame(positionDockCluster);
+  requestAnimationFrame(positionFloatingPanel);
 });
 root.style.setProperty("--sketch-text-size",prefs.sketchText.sizePx+"px");
+installNumericWheel(document);
 placeHistoryTimeline();
 setTool(activeTool);render();rebuild();
