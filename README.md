@@ -60,6 +60,7 @@ The View menu and Workspace tiles menu provide a transparent floating Solid mode
 
 ## Documents
 
+- [Independent floating CAD render views and visibility](docs/ADR-0009-FLOAT-RENDER-VIEWS.md)
 - [Owner-approved product vision and agent design contract](docs/PRODUCT-VISION.md)
 - [Experimental named parameters and formula data model](docs/ADR-0007-NAMED-PARAMETERS.md)
 - [Canvas-first UX and shortcuts](docs/UX-DIRECT-INTERACTION.md)
