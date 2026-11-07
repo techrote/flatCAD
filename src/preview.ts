@@ -103,7 +103,8 @@ export class Preview {
       event.preventDefault();event.stopImmediatePropagation();
     },{capture:true});
     const endFloat=(event:PointerEvent)=>{
-      if(!this.floatDrag||this.floatDrag.pointerId!==event.pointerId)return;
+      const drag=this.floatDrag;
+      if(!drag||drag.pointerId!==event.pointerId)return;
       this.floatDrag=null;
       delete this.container.dataset.floatDragging;
       if(surface.hasPointerCapture(event.pointerId))surface.releasePointerCapture(event.pointerId);
