@@ -60,6 +60,7 @@ The View menu and Workspace tiles menu provide a transparent floating Solid mode
 
 ## Documents
 
+- [Experimental inclined/twisted Z operations](docs/ADR-0008-INCLINED-TWISTED-EXTRUSION.md)
 - [Owner-approved product vision and agent design contract](docs/PRODUCT-VISION.md)
 - [Experimental named parameters and formula data model](docs/ADR-0007-NAMED-PARAMETERS.md)
 - [Canvas-first UX and shortcuts](docs/UX-DIRECT-INTERACTION.md)
