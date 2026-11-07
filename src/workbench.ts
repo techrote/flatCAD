@@ -22,6 +22,8 @@ import { SketchCanvas, type SketchTool } from "./sketch-canvas-v2";
 import { KernelClient } from "./kernel-client";
 import { Preview } from "./preview";
 import { createRenderNav } from "./render-nav";
+import {FloatRenderManager} from "./floating-views";
+import type {GeometryMesh} from "./kernel-protocol";
 import {loadRenderSettings,saveRenderSettings,validateRenderSettings,
   DEFAULT_RENDER_SETTINGS,RENDER_SETTINGS_KEY,type RenderSettings} from "./render-settings";
 import {
@@ -156,7 +158,8 @@ root.innerHTML=[
   '  <footer><button id="sketch-text-reset" class="button">Reset sketch text</button><button data-close="text-dialog" class="button primary">Done</button></footer></dialog>',
   '<dialog id="layout-dialog" class="settings-dialog"><div class="dialog-head"><div><strong>Workspace tiles</strong><small>Rearrange the existing controls without changing CAD data</small></div><button data-close="layout-dialog">×</button></div>',
   '  <div class="dialog-scroll"><label class="field"><span>Desktop layout</span><select id="tile-mode"><option value="split">Sketch + Solid with inspector below</option><option value="columns">Three adjustable columns</option><option value="float">Float — transparent draggable solid</option></select></label>',
-  '  <div id="tile-order" class="tile-order" aria-label="Tile arrangement"></div></div>',
+  '  <div id="tile-order" class="tile-order" aria-label="Tile arrangement"></div>',
+  '  <label class="layout-tile-visibility"><input id="tiled-solid-visible" type="checkbox" checked> Show tiled Solid viewport</label></div>',
   '  <footer><button id="tile-reset" class="button">Reset workspace</button><button data-close="layout-dialog" class="button primary">Done</button></footer></dialog>',
   '<dialog id="render-dialog" class="settings-dialog"><div class="dialog-head"><div><strong>Render</strong><small>Presentation only · exact CAD geometry unchanged</small></div><button data-close="render-dialog">×</button></div>',
   '  <div class="dialog-scroll"><label class="check render-effect-option"><input id="render-ao" type="checkbox"> Ambient occlusion (SSAO)</label>',
@@ -253,9 +256,9 @@ function inspectFeatureHistory(id:string|null,frame:KernelHistoryFrame|null):voi
   if(!id){
     delete host.dataset.historyFeatureId;
     delete host.dataset.historyFeatureCount;
-    preview?.setHistoryInspection(false);
+    setHistoryInspectionAll(false);
     byId("timeline-indicator").textContent="Current solid";
-    if(committedBuild)preview?.setMesh(
+    if(committedBuild)showSolidMesh(
       withoutCylinderSeams(committedBuild.mesh,doc),{preserveCamera:true});
     setVolume(committedBuild?.statistics?.volumeMm3??null);
     return;
@@ -268,9 +271,9 @@ function inspectFeatureHistory(id:string|null,frame:KernelHistoryFrame|null):voi
   if(extrudeTargets.length)closeExtrude();
   const mesh=withoutCylinderSeams(frame.mesh,doc);
   const showCut=frame.operation==="cut"&&Boolean(frame.cutTool?.mesh?.triangles.length);
-  preview?.setMesh(mesh,{preserveCamera:true,
+  showSolidMesh(mesh,{preserveCamera:true,
     ...(showCut?{pending:"cut" as const,cutTool:frame.cutTool!.mesh}:{})});
-  preview?.setHistoryInspection(true);
+  setHistoryInspectionAll(true);
   if(showCut){
     const token=historyCutToken,featureId=id;
     host.dataset.historyCutOverlay="true";
@@ -278,8 +281,8 @@ function inspectFeatureHistory(id:string|null,frame:KernelHistoryFrame|null):voi
     // Timer cancellation prevents old frames flashing over a newer selection.
     historyCutTimer=setTimeout(()=>{
       if(token!==historyCutToken||host.dataset.historyFeatureId!==featureId)return;
-      preview?.setMesh(mesh,{preserveCamera:true});
-      preview?.setHistoryInspection(true);
+      showSolidMesh(mesh,{preserveCamera:true});
+      setHistoryInspectionAll(true);
       delete host.dataset.historyCutOverlay;
     },HISTORY_CUT_FLASH_MS);
   }
@@ -405,6 +408,7 @@ dockAnchor.addEventListener("pointerdown",event=>{
 });
 requestAnimationFrame(positionDockCluster);
 let preview:Preview|null=null;
+let floatingViews:FloatRenderManager|null=null;
 try{
   const host=byId("preview");host.replaceChildren();preview=new Preview(host);
   host.parentElement!.append(createRenderNav(preview));
@@ -429,6 +433,30 @@ try{
   byId("preview").textContent="3D preview unavailable; sketching and STEP export remain available";
   status(String(error),true);
 }
+try{
+  floatingViews=new FloatRenderManager(
+    ()=>prefs.navigation,()=>renderSettings,
+    z=>{if(z!==null)lastSurfaceZ=z;fillFocusedFieldFromFace(z);},
+    message=>status(message,true)
+  );
+}catch(error){status("Independent floating views unavailable: "+String(error),true);}
+function showSolidMesh(mesh:GeometryMesh|null,
+  options:Parameters<Preview["setMesh"]>[1]={}):void{
+  preview?.setMesh(mesh,options);
+  floatingViews?.setMesh(mesh,options);
+}
+function setCommittedPickMeshAll(mesh:GeometryMesh|null):void{
+  preview?.setCommittedPickMesh(mesh);
+  floatingViews?.setCommittedPickMesh(mesh);
+}
+function setHistoryInspectionAll(active:boolean):void{
+  preview?.setHistoryInspection(active);
+  floatingViews?.setHistoryInspection(active);
+}
+function setFaceElevationsAll(z:readonly number[]):void{
+  preview?.setFaceElevations(z);
+  floatingViews?.setFaceElevations(z);
+}
 function safe(run:()=>void):void{
   try{run();}
   catch(error){status(error instanceof Error?error.message:String(error),true);render();}
@@ -441,6 +469,7 @@ function persistPreferences():void{
   try{
     prefs=validatePreferences(prefs);savePreferences(prefs);canvas.setPreferences(prefs);
     preview?.setNavigationPreset(prefs.navigation);
+    floatingViews?.setNavigationPreset(prefs.navigation);
     byId("extrude-nav-hint").textContent=NAVIGATION_HINTS[prefs.navigation];
     input("remember-surfaces").checked=prefs.rememberSurfaces;
     root!.style.setProperty("--sketch-text-size",prefs.sketchText.sizePx+"px");
@@ -682,12 +711,12 @@ function rebuild():void {
       lastStats=result.statistics;
       committedBuild=result;
       setVolume(result.statistics?.volumeMm3??null);
-      preview?.setFaceElevations(snapshot.features.flatMap(f=>[f.z,f.z+f.depth]));
+      setFaceElevationsAll(snapshot.features.flatMap(f=>[f.z,f.z+f.depth]));
       if(extrudeTargets.length&&input("extrude-preview").checked){
-        preview?.setCommittedPickMesh(result.mesh);
+        setCommittedPickMeshAll(result.mesh);
         scheduleOperationPreview();
       }else if(!byId("preview").dataset.historyFeatureId)
-        preview?.setMesh(withoutCylinderSeams(result.mesh,snapshot));
+        showSolidMesh(withoutCylinderSeams(result.mesh,snapshot));
       byId("preview").dataset.buildState="ready";
       if(isLandscapeHistory()||byId<HTMLDetailsElement>("history-details").open)
         ensureHistoryThumbnails();
@@ -755,7 +784,7 @@ function restoreCommittedPreview():void {
   delete host.dataset.previewOperation;
   byId("solid-preview-status").hidden=true;
   if(committedBuild)
-    preview?.setMesh(withoutCylinderSeams(committedBuild.mesh,doc),{preserveCamera:true});
+    showSolidMesh(withoutCylinderSeams(committedBuild.mesh,doc),{preserveCamera:true});
   setVolume(committedBuild?.statistics?.volumeMm3??null);
   // If a rebuild has not returned, keep displaying the previous valid mesh.
 }
@@ -975,7 +1004,7 @@ function scheduleOperationPreview():void {
       const pendingIds=candidate.features.slice(source.features.length).map(f=>f.id);
       const result=await kernel.build(candidate,{cutToolFeatureIds:mode==="cut"?pendingIds:[]});
       if(token!==previewToken||doc!==source||!extrudeTargets.length||!input("extrude-preview").checked)return;
-      preview?.setMesh(withoutCylinderSeams(result.mesh,candidate),{pending:mode,preserveCamera:true,
+      showSolidMesh(withoutCylinderSeams(result.mesh,candidate),{pending:mode,preserveCamera:true,
         cutTool:result.cutTool?.mesh});
       setVolume(result.statistics?.volumeMm3??null,true);
       host.dataset.previewState="ready";
@@ -1154,8 +1183,11 @@ const MENU:Record<string,[string,string][]> = {
    ["Named parameters…","dialog.parameters"]],
  view:[["Pan","tool.pan"],["Fit Solid View","view.fit"],["Grid and snapping…","dialog.grid"],["Profile list","view.profiles"],
    ["Properties","view.properties"],["History","view.history"],
-   ["Float solid","view.float"],["Dock solid","view.dock"],["Current solid","view.now"]],
- layout:[["Workspace tiles…","dialog.layout"],["Float solid","view.float"],["Dock solid","view.dock"]],
+   ["New floating view","view.float.new"],["Close floating views","view.float.close"],
+   ["Show tiled Solid","view.solid.show"],["Hide tiled Solid","view.solid.hide"],
+   ["Float solid (replace tile)","view.float"],["Dock solid","view.dock"],["Current solid","view.now"]],
+ layout:[["Workspace tiles…","dialog.layout"],["Float solid","view.float"],["Dock solid","view.dock"],
+   ["Show tiled Solid","view.solid.show"],["Hide tiled Solid","view.solid.hide"]],
  render:[["Effects and antialiasing…","dialog.render"],["Toggle ambient occlusion","render.toggle-ao"]],
  settings:[["Keyboard shortcuts…","dialog.shortcuts"],["Grid and snapping…","dialog.grid"],
    ["Sketch text…","dialog.text"],
@@ -1215,6 +1247,10 @@ function command(action:string):void{
     case "view.now":historyPanel.clearSelection();break;
     case "view.float":workspaceLayout.setTileMode("float");break;
     case "view.dock":workspaceLayout.setTileMode("split");break;
+    case "view.float.new":safe(()=>{floatingViews?.add();});break;
+    case "view.float.close":floatingViews?.removeAll();break;
+    case "view.solid.show":workspaceLayout.setTiledSolidVisible(true);break;
+    case "view.solid.hide":workspaceLayout.setTiledSolidVisible(false);break;
     case "prefs.export":exportSettings();break;
     case "prefs.import":input("settings-input").click();break;
     case "prefs.remember":
@@ -1278,6 +1314,7 @@ function applyRenderSettings(next:RenderSettings):void{
     renderSettings=validateRenderSettings(next);
     saveRenderSettings(renderSettings);
     preview?.setRenderSettings(renderSettings);
+    floatingViews?.setRenderSettings(renderSettings);
     input("render-ao").checked=renderSettings.ambientOcclusion;
     select("render-supersampling").value=String(renderSettings.supersampling);
   }catch(error){status("Render settings invalid: "+String(error),true);}
@@ -1291,6 +1328,7 @@ function showRenderSettings():void{
 function showLayoutSettings():void{
   closeMenu();
   select("tile-mode").value=workspaceLayout.tileMode;
+  input("tiled-solid-visible").checked=workspaceLayout.tiledSolidVisible;
   renderLayoutTileOrder();
   dialog("layout-dialog").showModal();
 }
@@ -1431,6 +1469,9 @@ button("tool-dock-toggle").onclick=()=>{
 };
 button("tool-dock-float").onclick=()=>workspaceLayout.setDocked(true);
 button("timeline-now").onclick=()=>historyPanel.clearSelection();
+input("tiled-solid-visible").onchange=()=>{
+  workspaceLayout.setTiledSolidVisible(input("tiled-solid-visible").checked);
+};
 select("tile-mode").onchange=()=>{
   workspaceLayout.setTileMode(select("tile-mode").value as "split"|"columns"|"float");
 };
@@ -1580,10 +1621,12 @@ window.addEventListener("storage",event=>{
   if(event.key===RENDER_SETTINGS_KEY){
     renderSettings=loadRenderSettings();
     preview?.setRenderSettings(renderSettings);
+    floatingViews?.setRenderSettings(renderSettings);
   }
   if(event.key===PREFS_KEY){
     prefs=loadPreferences();canvas.setPreferences(prefs);
     preview?.setNavigationPreset(prefs.navigation);
+    floatingViews?.setNavigationPreset(prefs.navigation);
     byId("extrude-nav-hint").textContent=NAVIGATION_HINTS[prefs.navigation];
     input("remember-surfaces").checked=prefs.rememberSurfaces;
     root!.style.setProperty("--sketch-text-size",prefs.sketchText.sizePx+"px");
