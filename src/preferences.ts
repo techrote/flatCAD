@@ -2,13 +2,14 @@
 import { validNavigationPreset, type NavigationPreset } from "./navigation";
 export type ShortcutAction =
   | "tool.select" | "tool.line" | "tool.rectangle" | "tool.centerRectangle"
-  | "tool.circle" | "tool.polygon" | "tool.slot" | "tool.pan"
+  | "tool.circle" | "tool.polygon" | "tool.slot" | "tool.pan" | "tool.rotate"
   | "feature.extrude" | "edit.delete" | "edit.duplicate"
   | "edit.undo" | "edit.redo" | "file.save" | "dialog.shortcuts" | "dialog.grid" | "view.fit";
 export const ACTION_LABELS:Record<ShortcutAction,string>={
   "tool.select":"Select", "tool.line":"Line / polyline", "tool.rectangle":"Rectangle",
   "tool.centerRectangle":"Centre rectangle", "tool.circle":"Circle",
   "tool.polygon":"Regular polygon", "tool.slot":"Slot", "tool.pan":"Pan",
+  "tool.rotate":"Rotate sketch element",
   "feature.extrude":"Extrude / Cut", "edit.delete":"Delete selected",
   "edit.duplicate":"Duplicate selected", "edit.undo":"Undo", "edit.redo":"Redo",
   "file.save":"Save project", "dialog.shortcuts":"Keyboard shortcuts",
@@ -17,7 +18,7 @@ export const ACTION_LABELS:Record<ShortcutAction,string>={
 export const DEFAULT_SHORTCUTS:Record<ShortcutAction,string>={
   "tool.select":"KeyV", "tool.line":"KeyL", "tool.rectangle":"KeyR",
   "tool.centerRectangle":"Shift+KeyR", "tool.circle":"KeyC",
-  "tool.polygon":"KeyP", "tool.slot":"KeyS", "tool.pan":"KeyM",
+  "tool.polygon":"KeyP", "tool.slot":"KeyS", "tool.pan":"KeyM", "tool.rotate":"KeyO",
   "feature.extrude":"KeyE", "edit.delete":"Delete", "edit.duplicate":"Control+KeyD",
   "edit.undo":"Control+KeyZ", "edit.redo":"Control+Shift+KeyZ",
   "file.save":"Control+KeyS", "dialog.shortcuts":"KeyK", "dialog.grid":"KeyG",
@@ -79,10 +80,10 @@ export function validatePreferences(source:unknown):Preferences {
     let input=source.shortcuts[action];
     // Old preference JSON predates Fit. Migrate without overwriting a user
     // who already assigned F to another action.
-    if(input===undefined&&action==="view.fit"){
-      input=Object.values(source.shortcuts).includes(DEFAULT_SHORTCUTS["view.fit"])
+    if(input===undefined&&(action==="view.fit"||action==="tool.rotate")){
+      input=Object.values(source.shortcuts).includes(DEFAULT_SHORTCUTS[action])
         ?""
-        :DEFAULT_SHORTCUTS["view.fit"];
+        :DEFAULT_SHORTCUTS[action];
     }
     if(typeof input!=="string")throw new Error("Shortcut missing for "+action);
     const chord=input===""?"":validateShortcut(input);

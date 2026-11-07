@@ -1163,7 +1163,7 @@ test("anchor remains stationary during docking and does not conceal rail buttons
   expect(Math.abs(after.x-before.x)).toBeLessThan(2);
   expect(Math.abs(after.y-before.y)).toBeLessThan(2);
   const tools=page.locator("#tool-dock-slot [data-tool]");
-  await expect(tools).toHaveCount(9);
+  await expect(tools).toHaveCount(10);
   const bounds=(await page.locator(".sketch-titlebar").boundingBox())!;
   const last=(await tools.last().boundingBox())!;
   expect(last.x+last.width).toBeLessThanOrEqual(bounds.x+bounds.width);
@@ -1184,4 +1184,32 @@ test("hover-wheel edits exact numeric fields without changing the sketch wheel z
   await expect(page.locator('[data-binding-target="profile:plate:width"]')).toHaveValue("101");
   const project=await saveProject(page);
   expect(project.profiles[0].width).toBe(101);
+});
+
+test("rotation tool edits sketch geometry around element centre and survives native save",async({page})=>{
+  await page.goto("/");
+  await newProject(page);
+  await page.keyboard.press("r");
+  await draw(page,[.39,.44],[.64,.61]);
+  await expect(page.locator("#profile-count")).toContainText("1 profiles");
+  await page.keyboard.press("o");
+  await expect(page.locator('[data-tool="rotate"]')).toHaveClass(/active/);
+  const box=(await page.locator("#sketch").boundingBox())!;
+  const centreX=box.x+box.width*.515,centreY=box.y+box.height*.525;
+  await page.mouse.move(centreX+34,centreY);
+  await page.mouse.down();
+  await page.mouse.move(centreX,centreY-45,{steps:8});
+  await page.mouse.up();
+  const doc=await saveProject(page);
+  expect(doc.profiles).toHaveLength(1);
+  expect(doc.profiles[0].kind).toBe("rectangle");
+  expect(doc.profiles[0].rotation).toBeGreaterThan(65);
+  expect(doc.profiles[0].rotation).toBeLessThan(125);
+  await page.keyboard.press("e");
+  await expect(page.locator("#extrude-flyout")).toBeVisible();
+  await page.locator("#apply-extrude").click();
+  await expect(page.locator("#status")).toContainText("Exact solid generated",{timeout:120000});
+  const volume=Number(await page.locator("#status").getAttribute("data-volume-mm3"));
+  const data=await saveProject(page);
+  expect(volume).toBeCloseTo(data.profiles[0].width*data.profiles[0].height*8,4);
 });

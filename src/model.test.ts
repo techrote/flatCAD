@@ -94,3 +94,16 @@ describe("signed feature depth and document compatibility",()=>{
     expect(validateDocument(DEMO).features[0].depth).toBe(8);
   });
 });
+
+describe("rotated rectangles retain valid v2 parametric geometry",()=>{
+  it("round-trips an authored rotation and preserves legacy absence",()=>{
+    const older=validateDocument(DEMO);
+    expect("rotation" in older.profiles[0]).toBe(false);
+    const rotated=validateDocument({...DEMO,profiles:DEMO.profiles.map((p,i)=>
+      i===0?{...p,rotation:22.5}:p)});
+    expect((rotated.profiles[0] as any).rotation).toBe(22.5);
+    expect(validateDocument(JSON.parse(JSON.stringify(rotated)))).toEqual(rotated);
+    expect(()=>validateDocument({...DEMO,profiles:DEMO.profiles.map((p,i)=>
+      i===0?{...p,rotation:Infinity}:p)})).toThrow("rotation");
+  });
+});

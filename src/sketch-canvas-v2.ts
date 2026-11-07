@@ -1,16 +1,17 @@
 import { newId, type CadDocument, type Point2, type Profile } from "./model";
-import { centre, distance, handles, hit, isClosed, isSimplePolygon, moveHandle, outline, snapPoints, translate } from "./geometry";
+import { centre, distance, handles, hit, isClosed, isSimplePolygon, moveHandle, outline, snapPoints, translate, rotateProfile } from "./geometry";
 import type { Preferences } from "./preferences";
 import { draftProfile, type DrawTool } from "./draw-primitives";
 
 export type SketchTool =
-  | "select" | "line" | "rectangle" | "centerRectangle" | "circle" | "polygon" | "slot" | "pan" | "extrude";
+  | "select" | "line" | "rectangle" | "centerRectangle" | "circle" | "polygon" | "slot" | "pan" | "extrude" | "rotate";
 type Gesture =
   | { kind:"draw"; tool:DrawTool; from:Point2; to:Point2; shift:boolean }
   | { kind:"pan"; from:Point2; origin:Point2 }
   | { kind:"move"; original:Profile; from:Point2; preview:Profile; duplicate:boolean }
   | { kind:"groupMove"; originals:Profile[]; from:Point2; previews:Profile[]; duplicate:boolean }
   | { kind:"handle"; original:Profile; index:number; preview:Profile }
+  | { kind:"rotate";original:Profile;pivot:Point2;startAngle:number;preview:Profile }
   | { kind:"depth"; startY:number; startDepth:number };
 export type SketchEvents = {
   onCreate(profile:Profile):void;
@@ -251,6 +252,21 @@ export class SketchCanvas {
       if(id&&!additive)this.events.onExtrude(id,point);
       else if(!id)this.events.onStatus("Click a closed profile to extrude or cut");
       this.draw();return;
+    }else if(this.tool==="rotate"){
+      const id=this.hitProfile(this.world(point))??this.selected;
+      if(id)this.events.onSelect(id,false);
+      const profile=this.doc.profiles.find(p=>p.id===id);
+      if(!profile){
+        this.events.onStatus("Select a sketch element to rotate");
+        return;
+      }
+      if(profile.kind==="circle"){
+        this.events.onStatus("A circle is rotationally symmetric");
+        return;
+      }
+      const pivot=centre(profile),at=this.world(point);
+      this.gesture={kind:"rotate",original:profile,pivot,
+        startAngle:Math.atan2(at.y-pivot.y,at.x-pivot.x),preview:profile};
     }else if(this.tool==="select"){
       const id=this.hitProfile(this.world(point));
       if(event.ctrlKey||event.metaKey){
@@ -306,6 +322,12 @@ export class SketchCanvas {
       const depth=Math.abs(target)<.1?(target<0?-.1:.1):target;
       if(this.extrude)this.extrude={...this.extrude,depth};
       this.events.onExtrudeDepth(depth);
+    }else if(g.kind==="rotate"){
+      const world=this.world(screen);
+      const angle=Math.atan2(world.y-g.pivot.y,world.x-g.pivot.x);
+      let degrees=(angle-g.startAngle)*180/Math.PI;
+      if(event.shiftKey)degrees=Math.round(degrees/15)*15;
+      g.preview=rotateProfile(g.original,degrees);
     }else{
       const world=this.maybeSnap(this.world(screen),event,
         (g.kind==="move"||g.kind==="handle")?g.original.id:
@@ -351,7 +373,7 @@ export class SketchCanvas {
           if(g.duplicate)this.events.onCreateMany(g.previews.map(p=>({...p,id:newId("copy")})));
           else this.events.onEditMany(g.previews);
         }
-      }else if(g.kind==="move"||g.kind==="handle"){
+      }else if(g.kind==="move"||g.kind==="handle"||g.kind==="rotate"){
         if(JSON.stringify(g.preview)!==JSON.stringify(g.original)){
           if(g.kind==="move"&&g.duplicate)this.events.onCreate({...g.preview,id:newId("copy")});
           else this.events.onEdit(g.preview);
@@ -489,7 +511,8 @@ export class SketchCanvas {
     ctx.clearRect(0,0,this.width,this.height);
     ctx.fillStyle="#0b1422";ctx.fillRect(0,0,this.width,this.height);
     this.drawGrid();
-    const preview=this.gesture?.kind==="move"||this.gesture?.kind==="handle"?this.gesture.preview:null;
+    const preview=this.gesture?.kind==="move"||this.gesture?.kind==="handle"||
+      this.gesture?.kind==="rotate"?this.gesture.preview:null;
     const group=this.gesture?.kind==="groupMove"?new Map(this.gesture.previews.map(p=>[p.id,p])):null;
     for(const p of this.doc.profiles){
       const item=group?.get(p.id)??(preview?.id===p.id?preview:p);

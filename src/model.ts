@@ -3,7 +3,7 @@ import { isSimplePolygon, signedArea } from "./geometry";
 import {deriveBoundGeometry,validateBindings,validateDefinitions,unbindDirectEdits,
   type NamedParameter,type ValueBinding} from "./parameters";
 export type Point2 = { x: number; y: number };
-export type Rectangle = { id:string; kind:"rectangle"; x:number; y:number; width:number; height:number };
+export type Rectangle = { id:string; kind:"rectangle"; x:number; y:number; width:number; height:number; rotation?:number };
 export type Circle = { id:string; kind:"circle"; x:number; y:number; radius:number };
 export type PolygonProfile = { id:string; kind:"polygon"; x:number; y:number; radius:number; sides:number; rotation:number };
 export type PathProfile = { id:string; kind:"path"; points:Point2[]; closed:boolean };
@@ -47,7 +47,11 @@ export function validateDocument(input: unknown): CadDocument {
       failUnless(coordinate(p.x)&&coordinate(p.y),"invalid rectangle coordinates");
       failUnless(positive(p.width) && positive(p.height), "invalid rectangle dimensions");
       failUnless(Math.abs(p.x + p.width) <= LIMIT && Math.abs(p.y + p.height) <= LIMIT, "rectangle outside extent");
-      return { kind: "rectangle", id: p.id, x: p.x, y: p.y, width: p.width, height: p.height };
+      if(p.rotation!==undefined)failUnless(coordinate(p.rotation)&&Math.abs(p.rotation)<=36000,
+        "invalid rectangle rotation");
+      // Legacy zero-rotation documents preserve their exact v1/v2 representation.
+      return { kind: "rectangle", id: p.id, x: p.x, y: p.y, width: p.width, height: p.height,
+        ...(p.rotation!==undefined?{rotation:p.rotation}:{}) };
     }
     if (p.kind === "circle") {
       failUnless(coordinate(p.x)&&coordinate(p.y),"invalid circle coordinates");

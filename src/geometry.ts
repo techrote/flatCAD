@@ -3,6 +3,31 @@ import type { Point2, Profile, PolygonProfile, SlotProfile } from "./model";
 
 const EPS=1e-9;
 export function distance(a:Point2,b:Point2):number { return Math.hypot(a.x-b.x,a.y-b.y); }
+export function rotatePoint(point:Point2,pivot:Point2,degrees:number):Point2{
+  const radians=degrees*Math.PI/180,cs=Math.cos(radians),sn=Math.sin(radians);
+  const dx=point.x-pivot.x,dy=point.y-pivot.y;
+  return {x:pivot.x+dx*cs-dy*sn,y:pivot.y+dx*sn+dy*cs};
+}
+export function normalizeDegrees(degrees:number):number{
+  return ((degrees+180)%360+360)%360-180;
+}
+export function rotateProfile(profile:Profile,degrees:number):Profile{
+  if(!Number.isFinite(degrees))throw new Error("Rotation must be finite");
+  const angle=normalizeDegrees(degrees);
+  if(Math.abs(angle)<1e-10)return profile;
+  const pivot=centre(profile);
+  switch(profile.kind){
+    case "rectangle":return {...profile,rotation:normalizeDegrees((profile.rotation??0)+angle)};
+    case "circle":return profile; // Rotationally invariant, and no fake history change.
+    case "polygon":return {...profile,rotation:normalizeDegrees(profile.rotation+angle)};
+    case "slot":{
+      const a=rotatePoint({x:profile.x1,y:profile.y1},pivot,angle),
+        b=rotatePoint({x:profile.x2,y:profile.y2},pivot,angle);
+      return {...profile,x1:a.x,y1:a.y,x2:b.x,y2:b.y};
+    }
+    case "path":return {...profile,points:profile.points.map(p=>rotatePoint(p,pivot,angle))};
+  }
+}
 export function polygonPoints(p:PolygonProfile):Point2[] {
   return Array.from({length:p.sides},(_,i)=>{
     const angle=(p.rotation+i*360/p.sides)*Math.PI/180;
@@ -26,9 +51,15 @@ export function slotPoints(p:SlotProfile,steps=16):Point2[] {
 }
 export function outline(p:Profile):Point2[] {
   switch(p.kind){
-    case "rectangle": return [
-      {x:p.x,y:p.y},{x:p.x+p.width,y:p.y},
-      {x:p.x+p.width,y:p.y+p.height},{x:p.x,y:p.y+p.height}];
+    case "rectangle":{
+      const points=[
+        {x:p.x,y:p.y},{x:p.x+p.width,y:p.y},
+        {x:p.x+p.width,y:p.y+p.height},{x:p.x,y:p.y+p.height}];
+      const rot=p.rotation??0;
+      if(rot===0)return points;
+      const pivot={x:p.x+p.width/2,y:p.y+p.height/2};
+      return points.map(point=>rotatePoint(point,pivot,rot));
+    }
     case "circle": return Array.from({length:48},(_,i)=>{
       const a=i*Math.PI/24;return {x:p.x+p.radius*Math.cos(a),y:p.y+p.radius*Math.sin(a)};});
     case "polygon": return polygonPoints(p);
@@ -144,9 +175,11 @@ export function moveHandle(p:Profile,index:number,to:Point2,shift=false):Profile
   }
   const corners=outline(p);
   const opposite=corners[(index+2)%4];
-  let dx=to.x-opposite.x,dy=to.y-opposite.y;
+  const local=rotatePoint(to,opposite,-(p.rotation??0));
+  let dx=local.x-opposite.x,dy=local.y-opposite.y;
   if(shift){const size=Math.max(Math.abs(dx),Math.abs(dy));dx=Math.sign(dx||1)*size;dy=Math.sign(dy||1)*size;}
-  return {...p,x:Math.min(opposite.x,opposite.x+dx),y:Math.min(opposite.y,opposite.y+dy),
+  const middle={x:(to.x+opposite.x)/2,y:(to.y+opposite.y)/2};
+  return {...p,x:middle.x-Math.abs(dx)/2,y:middle.y-Math.abs(dy)/2,
     width:Math.abs(dx),height:Math.abs(dy)};
 }
 export function snapPoints(p:Profile):Point2[]{

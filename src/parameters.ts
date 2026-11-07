@@ -132,7 +132,7 @@ export function numericExpression(expression:string,definitions:readonly NamedPa
   });
 }
 const PROFILE_FIELDS:Record<Profile["kind"],readonly string[]>={
-  rectangle:["x","y","width","height"],circle:["x","y","radius"],
+  rectangle:["x","y","width","height","rotation"],circle:["x","y","radius"],
   polygon:["x","y","radius","rotation","sides"],
   slot:["x1","y1","x2","y2","radius"],path:[]
 };
@@ -153,6 +153,7 @@ export function fieldValue(doc:CadDocument,target:string):number|null{
     return p.points[Number(match[1])]?.[match[2] as "x"|"y"]??null;
   }
   if(!PROFILE_FIELDS[p.kind].includes(field))return null;
+  if(p.kind==="rectangle"&&field==="rotation")return p.rotation??0;
   return (p as unknown as Record<string,number>)[field];
 }
 export function deriveBoundGeometry(doc:CadDocument):CadDocument{
