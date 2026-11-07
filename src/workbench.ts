@@ -23,6 +23,7 @@ import { KernelClient } from "./kernel-client";
 import { Preview } from "./preview";
 import { createRenderNav } from "./render-nav";
 import {FloatRenderManager} from "./floating-views";
+import {installFloatingFrame} from "./floating-frame";
 import type {GeometryMesh} from "./kernel-protocol";
 import {loadRenderSettings,saveRenderSettings,validateRenderSettings,
   DEFAULT_RENDER_SETTINGS,RENDER_SETTINGS_KEY,type RenderSettings} from "./render-settings";
@@ -157,7 +158,7 @@ root.innerHTML=[
   '  <label class="field"><span>Weight</span><select id="sketch-font-weight" aria-label="Sketch font weight"><option value="400">Regular</option><option value="500">Medium</option><option value="600">Semibold</option><option value="700">Bold</option></select></label></div>',
   '  <footer><button id="sketch-text-reset" class="button">Reset sketch text</button><button data-close="text-dialog" class="button primary">Done</button></footer></dialog>',
   '<dialog id="layout-dialog" class="settings-dialog"><div class="dialog-head"><div><strong>Workspace tiles</strong><small>Rearrange the existing controls without changing CAD data</small></div><button data-close="layout-dialog">×</button></div>',
-  '  <div class="dialog-scroll"><label class="field"><span>Desktop layout</span><select id="tile-mode"><option value="split">Sketch + Solid with inspector below</option><option value="columns">Three adjustable columns</option><option value="float">Float — transparent draggable solid</option></select></label>',
+  '  <div class="dialog-scroll"><label class="field"><span>Desktop layout</span><select id="tile-mode"><option value="split">Sketch + Solid with inspector below</option><option value="columns">Three adjustable columns</option><option value="float">Float — movable, resizable Solid viewport</option></select></label>',
   '  <div id="tile-order" class="tile-order" aria-label="Tile arrangement"></div>',
   '  <label class="layout-tile-visibility"><input id="tiled-solid-visible" type="checkbox" checked> Show tiled Solid viewport</label></div>',
   '  <footer><button id="tile-reset" class="button">Reset workspace</button><button data-close="layout-dialog" class="button primary">Done</button></footer></dialog>',
@@ -347,16 +348,26 @@ function positionFloatingPanel():void{
   const panel=document.querySelector<HTMLElement>(".preview-panel");
   if(!panel)return;
   const enabled=workspaceLayout.tileMode==="float";
-  const {x,y}=workspaceLayout.floatingPosition;
   if(enabled){
-    panel.style.left=Math.round(x*Math.max(0,window.innerWidth-panel.offsetWidth))+"px";
-    panel.style.top=Math.round(y*Math.max(0,window.innerHeight-panel.offsetHeight))+"px";
+    const rect=workspaceLayout.floatingRect;
+    panel.style.left=rect.left+"px";
+    panel.style.top=rect.top+"px";
+    panel.style.width=rect.width+"px";
+    panel.style.height=rect.height+"px";
   }else{
     panel.style.removeProperty("left");
     panel.style.removeProperty("top");
+    panel.style.removeProperty("width");
+    panel.style.removeProperty("height");
   }
   preview?.setFloating(enabled);
 }
+installFloatingFrame(document.querySelector<HTMLElement>(".preview-panel")!,{
+  enabled:()=>workspaceLayout.tileMode==="float",
+  onChange:rect=>workspaceLayout.updateFloatingRect(rect),
+  onEnd:()=>workspaceLayout.persistFloatingRect()
+});
+window.addEventListener("resize",()=>requestAnimationFrame(positionFloatingPanel));
 /** Keep the anchor at the same titlebar X when the toolbar is moved to it.
  *  Reserve room for all buttons *before* docking to avoid hidden tools. */
 function dockAnchorTravel():number{
@@ -420,13 +431,6 @@ try{
   });
   preview.setSurfaceHoverHandler((target,pointer)=>updateSurfaceLabel(target,pointer));
   preview.setSurfaceMenuHandler((target,pointer)=>showSurfaceContext(target,pointer));
-  preview.setFloatDragHandler((dx,dy)=>{
-    const panel=document.querySelector<HTMLElement>(".preview-panel")!;
-    const {x,y}=workspaceLayout.floatingPosition;
-    const maxX=Math.max(1,window.innerWidth-panel.offsetWidth);
-    const maxY=Math.max(1,window.innerHeight-panel.offsetHeight);
-    workspaceLayout.setFloatPosition(x+dx/maxX,y+dy/maxY);
-  });
   preview.setFloating(workspaceLayout.tileMode==="float");
   requestAnimationFrame(positionFloatingPanel);
 }catch(error){
