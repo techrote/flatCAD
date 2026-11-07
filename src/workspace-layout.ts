@@ -3,15 +3,16 @@
  */
 export type LayoutAxis="horizontal"|"vertical";
 export type TileId="sketch"|"solid"|"properties";
-export type TileMode="split"|"columns";
+export type TileMode="split"|"columns"|"float";
 export type LayoutState={
   version:1;main:number;solid:number;docked:boolean;
   tileMode:TileMode;tileOrder:[TileId,TileId,TileId];dockX:number;
+  floatX:number;floatY:number;
 };
 export const LAYOUT_KEY="flatcad.layout.v1";
 export const DEFAULT_LAYOUT:LayoutState={
   version:1,main:.56,solid:.54,docked:false,tileMode:"split",
-  tileOrder:["sketch","properties","solid"],dockX:.5
+  tileOrder:["sketch","properties","solid"],dockX:.5,floatX:.58,floatY:.17
 };
 const TILE_IDS:TileId[]=["sketch","solid","properties"];
 const finite=(n:unknown):n is number=>typeof n==="number"&&Number.isFinite(n);
@@ -38,11 +39,14 @@ export function validateLayout(input:unknown):LayoutState{
   const tileMode=value.tileMode===undefined?"split":value.tileMode;
   const tileOrder=value.tileOrder===undefined?DEFAULT_LAYOUT.tileOrder:value.tileOrder;
   const dockX=value.dockX===undefined?DEFAULT_LAYOUT.dockX:value.dockX;
-  if((tileMode!=="split"&&tileMode!=="columns")||!validTileOrder(tileOrder)||
-    !finite(dockX)||dockX<0||dockX>1)
+  const floatX=value.floatX===undefined?DEFAULT_LAYOUT.floatX:value.floatX;
+  const floatY=value.floatY===undefined?DEFAULT_LAYOUT.floatY:value.floatY;
+  if((tileMode!=="split"&&tileMode!=="columns"&&tileMode!=="float")||!validTileOrder(tileOrder)||
+    !finite(dockX)||dockX<0||dockX>1||
+    !finite(floatX)||floatX<0||floatX>1||!finite(floatY)||floatY<0||floatY>1)
     throw new Error("Invalid workspace panel arrangement");
   return {version:1,main:value.main,solid:value.solid,
-    docked:value.docked,tileMode,tileOrder:[...tileOrder],dockX};
+    docked:value.docked,tileMode,tileOrder:[...tileOrder],dockX,floatX,floatY};
 }
 export function loadLayout():LayoutState{
   try{
@@ -74,6 +78,7 @@ export class WorkspaceLayoutController{
   get docked():boolean{return this.state.docked;}
   get dockX():number{return this.state.dockX;}
   get tileMode():TileMode{return this.state.tileMode;}
+  get floatingPosition():{x:number;y:number}{return {x:this.state.floatX,y:this.state.floatY};}
   get tileOrder():[TileId,TileId,TileId]{return [...this.state.tileOrder];}
   setDocked(docked:boolean):void{
     if(this.state.docked===docked)return;
@@ -88,6 +93,12 @@ export class WorkspaceLayoutController{
   setTileMode(mode:TileMode):void{
     if(mode!==this.state.tileMode)this.commit({...this.state,tileMode:mode});
   }
+  setFloatPosition(x:number,y:number):void{
+    if(!Number.isFinite(x)||!Number.isFinite(y))return;
+    const floatX=Math.max(0,Math.min(1,x)),floatY=Math.max(0,Math.min(1,y));
+    if(Math.abs(this.state.floatX-floatX)+Math.abs(this.state.floatY-floatY)<1e-5)return;
+    this.commit({...this.state,floatX,floatY});
+  }
   setTileOrder(order:TileId[]):void{
     if(!validTileOrder(order))throw new Error("Invalid tile order");
     this.commit({...this.state,tileOrder:[...order]});
@@ -95,7 +106,8 @@ export class WorkspaceLayoutController{
   resetArrangement():void{
     this.commit({...this.state,tileMode:DEFAULT_LAYOUT.tileMode,
       tileOrder:[...DEFAULT_LAYOUT.tileOrder],main:DEFAULT_LAYOUT.main,
-      solid:DEFAULT_LAYOUT.solid,dockX:DEFAULT_LAYOUT.dockX});
+      solid:DEFAULT_LAYOUT.solid,dockX:DEFAULT_LAYOUT.dockX,
+      floatX:DEFAULT_LAYOUT.floatX,floatY:DEFAULT_LAYOUT.floatY});
   }
   private commit(next:LayoutState):void{
     this.state=validateLayout(next);
@@ -126,6 +138,7 @@ export class WorkspaceLayoutController{
   private apply():void{
     const three=this.isThree();
     this.outer.classList.toggle("three-tiles",three);
+    this.outer.classList.toggle("float-solid",this.state.tileMode==="float");
     this.outer.dataset.tileMode=three?"columns":this.state.tileMode;
     this.outer.dataset.tileOrder=this.state.tileOrder.join(",");
     for(const [i,id] of this.state.tileOrder.entries())

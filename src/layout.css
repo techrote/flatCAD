@@ -353,3 +353,62 @@
     grid-template-rows:minmax(0,1fr) 134px;
   }
 }
+
+/* Anchor button has precisely the same footprint as the docked rail buttons.
+ * Its background is transparent and its position is reserved against the
+ * FULL docked toolbar width in both states, preventing relocation on click. */
+.tool-dock-cluster .dock-anchor{
+  width:29px;height:29px;min-width:29px;min-height:29px;
+  padding:0;border:1px solid #619acb;background:transparent;
+  box-shadow:none;border-radius:6px;
+}
+.tool-dock-cluster .dock-anchor[aria-pressed="true"]{
+  background:transparent;border-color:#8ec2ef;
+}
+.workbench-layout.tools-docked .tool-dock-slot{
+  max-width:none;overflow-x:visible;flex:0 0 auto;
+}
+.tool-dock-cluster:has(.tool-dock-slot #sketch-tool-rail){
+  max-width:none;flex:0 0 auto;
+}
+@media(max-width:900px){
+  .workbench-layout.tools-docked .sketch-titlebar{
+    flex-wrap:wrap;align-content:center;
+  }
+  .workbench-layout.tools-docked .tool-dock-cluster{
+    flex-wrap:wrap;max-width:100%;
+  }
+}
+/* Floating Solid: no frame/background/titlebar, the actual WebGL pixels are
+ * transparent and only raycast hits activate mouse input. It is positioned
+ * above tiles but below menus and modal dialogs. */
+.workbench-layout.float-solid .preview-panel{
+  position:fixed!important;z-index:35;
+  width:min(380px,48vw);height:min(340px,50vh);
+  min-width:200px;min-height:180px;
+  padding:0;margin:0;overflow:visible;
+  border:0;border-radius:0;box-shadow:none;
+  background:transparent;pointer-events:none;
+}
+.workbench-layout.float-solid .preview-panel .solid-titlebar,
+.workbench-layout.float-solid .preview-panel .solid-preview-status,
+.workbench-layout.float-solid .preview-panel .cut-tool-metrics{
+  display:none!important;
+}
+.workbench-layout.float-solid .preview-panel .preview-root{
+  width:100%;height:100%;min-height:0;
+  background:transparent;pointer-events:none;
+}
+.workbench-layout.float-solid .preview-root canvas{
+  background:transparent;pointer-events:none;
+}
+.workbench-layout.float-solid .workbench-side{
+  grid-template-rows:minmax(0,1fr);
+}
+.workbench-layout.float-solid .workbench-side .side-resizer{display:none}
+.workbench-layout.float-solid .inspector-drawer{
+  grid-row:1;min-height:0;overflow:auto;
+}
+@media(min-width:1101px){
+  .workbench-layout.float-solid .workbench-side{display:grid}
+}

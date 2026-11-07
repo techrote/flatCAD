@@ -54,6 +54,10 @@ Geometric constraint solving, standalone arcs, automatic region extraction from 
 
 **Engineering caution:** The current tests are not evidence of complete B-rep correctness or reliable interchange. See [Acceptance](docs/ACCEPTANCE.md).
 
+## Experimental UI: floating Solid and wheel fields
+
+The View menu and Workspace tiles menu provide a transparent floating Solid mode. Drag the rendered solid itself with the left button; configured CAD navigation controls respond only when initially hovering the actual rendered object. The background of the floating preview remains click-through, preserving access to Sketch. Floating position is stored in layout preferences, not the CAD document. Dock Solid restores the conventional tile. Numeric properties can be focused and adjusted with the mouse wheel while hovered (Shift for fine, Ctrl for coarse steps). In the feature timeline, clicking a Cut briefly displays its exact translucent cutting tool for 867 ms; the history selection itself remains active until changed. These controls are opt-in and do not add onboarding surfaces.
+
 ## Documents
 
 - [Owner-approved product vision and agent design contract](docs/PRODUCT-VISION.md)
