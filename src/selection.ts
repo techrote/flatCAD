@@ -23,12 +23,16 @@ export function suggestGroupOperation(doc: CadDocument, ids: readonly string[]):
 
 export function documentWithExtrusions(
   doc: CadDocument, ids: readonly string[], operation: "add" | "cut", z: number, depth: number,
+  direction:{tiltX?:number;tiltY?:number;twist?:number}={},
 ): CadDocument {
   const profiles = selectedProfiles(doc, ids);
   if (profiles.length !== new Set(ids).size || profiles.length === 0) throw new Error("Select at least one existing profile");
   if (profiles.some(p => !isClosed(p))) throw new Error("Open paths cannot be extruded");
   const features: Feature[] = profiles.map(profile => ({
     id: newId("feature"), profileId: profile.id, operation, z, depth,
+    ...(direction.tiltX?{tiltX:direction.tiltX}:{}),
+    ...(direction.tiltY?{tiltY:direction.tiltY}:{}),
+    ...(direction.twist?{twist:direction.twist}:{}),
   }));
   return validateDocument({ ...doc, features: [...doc.features, ...features] });
 }

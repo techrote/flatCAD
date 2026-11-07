@@ -140,9 +140,9 @@ export function fieldValue(doc:CadDocument,target:string):number|null{
   const [kind,id,field,...extra]=target.split(":");
   if(extra.length)return null;
   if(kind==="feature"){
-    if(field!=="z"&&field!=="depth")return null;
+    if(!["z","depth","tiltX","tiltY","twist"].includes(field))return null;
     const f=doc.features.find(x=>x.id===id);
-    return f?f[field]:null;
+    return f?((f as unknown as Record<string,number|undefined>)[field]??0):null;
   }
   if(kind!=="profile")return null;
   const p=doc.profiles.find(x=>x.id===id);

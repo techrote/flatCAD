@@ -3,7 +3,7 @@ import opencascade from "replicad-opencascadejs";
 import wasmUrl from "replicad-opencascadejs/wasm?url";
 import { Sketcher } from "replicad";
 import { setOC, sketchRectangle, sketchCircle, measureVolume, type Shape3D } from "replicad";
-import { polygonPoints, outline } from "./geometry";
+import { polygonPoints, outline, centre, rotatePoint } from "./geometry";
 import { signedInterval } from "./signed-extrusion";
 import { validateDocument, type Feature, type Profile } from "./model";
 import type { KernelRequest, KernelResponse, GeometryMesh, KernelStatistics,
@@ -24,7 +24,72 @@ function initialize(): Promise<void> {
   return initializePromise;
 }
 
+/** Advanced Z-progression remains anchored to the fixed authored XY plane.
+ *  Tilt translates each XY section as height increases, rather than tilting
+ *  the sketch plane. Twist rotates sections about their authored centroid.
+ *  Both are kernel B-reps, not mesh approximations.
+ */
+function makeDirectedTool(profile:Profile,feature:Feature):Shape3D{
+  const span=signedInterval(feature.z,feature.depth);
+  const height=span.height,sign=feature.depth>=0?1:-1;
+  const dx=Math.tan((feature.tiltX??0)*Math.PI/180);
+  const dy=Math.tan((feature.tiltY??0)*Math.PI/180);
+  const twist=feature.twist??0;
+  const pivot=centre(profile);
+  // Negative signed depth is authored from the high plane downwards. The
+  // worker constructs bottom → top, so its bottom section is displaced or
+  // pre-rotated to yield the exact authored start/end positions.
+  const startX=sign<0?dx*height:0,startY=sign<0?dy*height:0;
+  const baseTwist=sign<0?twist:0;
+  const lower=span.lower;
+  const origin:[number,number,number]=[pivot.x+startX,pivot.y+startY,lower];
+  const direction=sign<0?[-dx,-dy,1] as [number,number,number]:
+    [dx,dy,1] as [number,number,number];
+  const distance=height*Math.hypot(direction[0],direction[1],1);
+  const config:{
+    extrusionDirection?:[number,number,number];
+    twistAngle?:number;
+    origin?:[number,number,number];
+  }={};
+  if(dx!==0||dy!==0)config.extrusionDirection=direction;
+  if(twist!==0){
+    config.twistAngle=sign*twist;
+    config.origin=origin;
+  }
+  if(profile.kind==="circle"){
+    // Twisting a circular section about its own centre is geometrically
+    // invariant; do not invoke a high-cost periodic B-rep sweep unnecessarily.
+    return sketchCircle(profile.radius,{plane:"XY",origin}).extrude(distance,
+      twist===0?config:{});
+  }
+  const transformed=(p:{x:number;y:number}):[number,number]=>{
+    const q=baseTwist?rotatePoint(p,pivot,baseTwist):p;
+    return [q.x-pivot.x,q.y-pivot.y];
+  };
+  const sketch=new Sketcher("XY",origin);
+  if(profile.kind==="slot"){
+    const x=profile.x2-profile.x1,y=profile.y2-profile.y1;
+    const length=Math.hypot(x,y),px=-y/length*profile.radius,py=x/length*profile.radius;
+    const p0=transformed({x:profile.x1+px,y:profile.y1+py});
+    const p1=transformed({x:profile.x2+px,y:profile.y2+py});
+    const p2=transformed({x:profile.x2-px,y:profile.y2-py});
+    const p3=transformed({x:profile.x1-px,y:profile.y1-py});
+    return sketch.movePointerTo(p0).lineTo(p1)
+      .sagittaArcTo(p2,-profile.radius)
+      .lineTo(p3).sagittaArcTo(p0,-profile.radius)
+      .done().extrude(distance,config);
+  }
+  if(profile.kind==="path"&&!profile.closed)
+    throw new Error("Cannot extrude an open polyline");
+  const points=outline(profile);
+  sketch.movePointerTo(transformed(points[0]));
+  for(const p of points.slice(1))sketch.lineTo(transformed(p));
+  return sketch.close().extrude(distance,config);
+}
+
 function makeTool(profile: Profile, feature: Feature): Shape3D {
+  if((feature.tiltX??0)!==0||(feature.tiltY??0)!==0||
+    (feature.twist??0)!==0)return makeDirectedTool(profile,feature);
   // Preserve signed depth in source; normalize only for B-rep construction.
   const span = signedInterval(feature.z,feature.depth);
   const originZ=span.lower, height=span.height;
