@@ -145,3 +145,16 @@ The Solid camera is a persistent user view, not a side effect of modelling. Afte
 Feature History expands on demand. Each chronological entry names the operation and chosen sketch type/ordinal, and shows a thumbnail of the B-rep solid **after that feature**. A Cut entry includes its entire red cutter as an overlay, making overshoot visible. Numeric Z/depth and operation controls remain editable in the same entry. Rendering this drawer must not reset Solid camera pose or block a normal rebuild.
 
 Hover targeting deliberately distinguishes sketch and Solid operations. Highlight eligible horizontal face regions with high-contrast cyan, never colour vertical or sloped side faces. Real B-rep edge endpoints activate within a 17px radius and display a transparent green sphere of exactly the same apparent radius. Hover highlighting does not imply a stable persistent face identifier. It remains clear and does not write model parameters.
+
+
+## Adaptive split workspace and newest-first history tiles (2026-11-07)
+
+The direct canvas is given the most space. The separator between Sketch and Solid and the separator between Solid preview and the lower inspectors are keyboard-accessible separator surfaces supporting drag, Arrow keys, Home/End and double-click reset. Desktop uses a left/right Sketch/Solid split; narrow windows stack them and retain a draggable row separator. Layout ratios are clamped to sensible minimum panel sizes and stored as local UI preferences rather than inside the native CAD document.
+
+The Sketch toolbar has an explicit **Dock / Undock** title-bar control. Docking moves the *same live toolbar* from the floating canvas rail to the header as a compact horizontal tool strip; it does not recreate buttons, drop event handlers, alter the active sketch tool or change sketch pan/zoom. This dock preference persists across reloads.
+
+**Feature History** retains chronological source replay internally, but displays tiles **newest at the top**, with a multi-column thumbnail grid. Each tile keeps its post-feature B-rep snapshot and red full-cutter overlay for cuts. A single selected tile exposes one shared edit panel with operation, Start Z, signed Depth and Delete. Other tiles show no inputs. The panel can be closed with the same tile or a clearly labelled ×. Rebuilt snapshots must not reset the user's Solid camera.
+
+The global bottom status bar is removed. Undo/Redo and Grid move to the Sketch header, along with tool dock, zoom and profile count. The exact solid volume moves to the Solid header. During uncommitted Add/Cut preview, that header explicitly shows the provisional volume. Errors appear as a contextual overlay; non-error status continues to be available in the accessibility status region.
+
+**Acceptance:** real browser tests must resize both dividers with pointer gestures, confirm nonzero canvas dimensions and split persistence, test keyboard/stacked layout, dock/undock/reload without loss of shortcuts, verify newest-first tiles and hidden controls until clicked, and check title-bar commands plus volume and disappearance of the permanent footer. All these are UI mutations only; the native CAD document cannot be changed by resizing/docking.

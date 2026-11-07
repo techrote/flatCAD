@@ -68,3 +68,13 @@ Automated tests must verify additive/toggle Ctrl-click selection, one-history-ac
 3. Open Feature history after a completed build: each feature has an operation + sketch-derived name and B-rep-derived post-operation thumbnail; for cuts the thumbnail visibly overlays red cutter geometry including overshoot, with total cutter volume recorded separately. Changing a parameter regenerates thumbnails; changing only selection does not reconstruct them.
 4. Hover a horizontal face: high-contrast cyan planar overlay. Hover a vertical side: NO side face overlay. Hover an actual OCCT edge-endpoint: green translucent sphere matching the full 17 CSS-pixel hit radius, correctly scaled under zoom; don't treat tessellation's arbitrary internal vertices as CAD vertices. Mouseover never edits the native document.
 5. Unit and Chromium regression tests gate each change; Windows/Firefox/HiDPI and novice manual acceptance remain separate. Explicitly measure large history performance and worker memory before manufacturing-grade assertions.
+
+
+## Split-panel workspace and history density qualification
+
+- Desktop: drag the Sketch/Solid divider horizontally and the Solid/inspector divider vertically, verify both adjacent panels resize and that sketch coordinates/solid camera remain unchanged. Reload and verify persisted ratios; focus separators and use arrow keys; double-click resets.
+- Responsive: on a narrower viewport the main separator changes to a horizontal grip between stacked Sketch and Solid. Neither panel becomes unusable, WebGL/canvas backing sizes follow their CSS containers, and no browser drag-preview artifact appears.
+- Toolbar Dock/Undock: move the same tool DOM to/from the Sketch titlebar; verify buttons, active selection, shortcuts and direct pointer drawing still work after docking and after reload. No saved CAD geometry should change.
+- Feature history: newest chronological feature displays first while underlying feature-replay order remains oldest-first. Dense tile grid contains no input/select controls until a tile is selected. Only one editor is visible at a time, with operation, Start Z, signed Depth and Delete. Red cut overlays remain visible in tile thumbnails. Changing selection does not regenerate geometry unnecessarily.
+- Titlebar: remove global bottom footer and Sketch strip, place Undo/Redo in Sketch header and exact/provisional volume plus CAD status indicator in Solid header. Verify buttons execute real actions, not merely decorative UI, and that errors remain visible/accessibly reported.
+- Manual keyboard, Windows/Firefox, small-window and zoom/HiDPI inspection remains required beyond Chromium CI.
