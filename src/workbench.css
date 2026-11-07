@@ -290,3 +290,38 @@ kbd{
   pointer-events:none;
 }
 .remember-surface-setting{margin-top:20px;padding:8px 0;font-weight:550}
+
+/* Feature provenance: thumbnail after each exact B-rep operation. */
+.history-feature-card{
+  padding:9px;gap:7px;min-width:0;
+}
+.history-card-heading{
+  display:flex;gap:10px;align-items:center;min-width:0;
+}
+.history-thumbnail{
+  display:block;width:112px;max-width:46%;height:auto;aspect-ratio:11 / 6;
+  flex:0 0 auto;background:#0b1928;border:1px solid #385571;
+  border-radius:5px;object-fit:contain;
+}
+.history-summary{
+  display:flex;flex-direction:column;gap:5px;
+  min-width:0;flex:1;line-height:1.35;
+}
+.history-feature-name{
+  color:#e1f0ff;font-size:11px;letter-spacing:.005em;
+  overflow-wrap:anywhere;
+}
+.history-feature-extent,.history-feature-volume{
+  color:#90b1cf;font:10px ui-monospace,Consolas,monospace;
+  overflow-wrap:anywhere;
+}
+.history-feature-card[data-operation="cut"] .history-feature-name{color:#ffc1c5}
+.history-feature-card[data-thumbnail-state="pending"] .history-thumbnail{
+  border-style:dashed;opacity:.8;
+}
+.history-feature-card .field-row{
+  align-items:end;display:flex;gap:6px;flex-wrap:wrap;
+}
+.history-feature-card .field-row .field{min-width:54px}
+.solid-view-actions{display:flex;align-items:center;gap:5px}
+.solid-view-actions .text-button{font-size:11px;padding:5px 7px}
