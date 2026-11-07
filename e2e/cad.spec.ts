@@ -1296,6 +1296,11 @@ test("multiple floating renders preserve independent cameras and optionally hidd
   const first=views.nth(0),second=views.nth(1);
   await first.locator('[data-nav="underground"]').click();
   await expect(first.locator(".floating-render-canvas")).toHaveAttribute("data-home-mode","underground");
+  // The second view overlaps the first view's centre. Activating the first
+  // navigation tile must foreground its canvas before pointer interactions.
+  const firstZ=await first.evaluate(el=>Number((el as HTMLElement).style.zIndex));
+  const secondZ=await second.evaluate(el=>Number((el as HTMLElement).style.zIndex));
+  expect(firstZ).toBeGreaterThan(secondZ);
   const d1=(await first.locator(".floating-render-canvas").getAttribute("data-camera-direction"))!
     .split(",").map(Number);
   const d2=(await second.locator(".floating-render-canvas").getAttribute("data-camera-direction"))!
@@ -1321,6 +1326,11 @@ test("multiple floating renders preserve independent cameras and optionally hidd
   expect(after.y).toBeGreaterThan(coords.y+15);
   await page.reload();
   await expect(views).toHaveCount(2);
+  const restored=(await views.first().boundingBox())!;
+  // Drag-end persistence is separate from the CAD document and must survive
+  // reload without synchronous localStorage writes during pointermove.
+  expect(Math.abs(restored.x-after.x)).toBeLessThan(3);
+  expect(Math.abs(restored.y-after.y)).toBeLessThan(3);
   await expect(page.locator(".preview-panel")).toBeHidden();
   await views.first().locator('[data-nav="close"]').click();
   await expect(views).toHaveCount(1);
