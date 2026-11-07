@@ -552,7 +552,11 @@ function renderHistory():void{
  * from the primary Solid build. A blocked thumbnail request cannot blank
  * the main canvas or reset the camera. */
 function ensureHistoryThumbnails():void{
-  if(!isLandscapeHistory()&&!byId<HTMLDetailsElement>("history-details").open||
+  // The timeline is mounted before the initial solid build. Do not enqueue
+  // history work that rebuild() will immediately invalidate; begin after
+  // the authoritative main render completes.
+  if(byId("preview").dataset.buildState!=="ready"||
+    (!isLandscapeHistory()&&!byId<HTMLDetailsElement>("history-details").open)||
     !doc.features.length||historySnapshotDoc===doc||
     thumbnailsRequestedFor===doc)return;
   const snapshot=doc,token=++thumbnailToken;
@@ -620,7 +624,7 @@ function rebuild():void {
       }else if(!byId("preview").dataset.historyFeatureId)
         preview?.setMesh(withoutCylinderSeams(result.mesh,snapshot));
       byId("preview").dataset.buildState="ready";
-      if(byId<HTMLDetailsElement>("history-details").open)
+      if(isLandscapeHistory()||byId<HTMLDetailsElement>("history-details").open)
         ensureHistoryThumbnails();
       if(result.statistics){
         byId("status").dataset.volumeMm3=String(result.statistics.volumeMm3);
@@ -724,6 +728,15 @@ function positionExtrudeMenu():void {
   if(flyout.hidden)return;
   const viewport=canvas.getViewport();
   const cursor=extrudeCursor??canvas.getSelectedPoint()??{x:viewport.width/2,y:viewport.height/2};
+  // A bottom history timeline reduces the available Sketch height. Instead
+  // of shifting the popup away from its initiating cursor, constrain its
+  // interior height and allow internal scrolling. This also handles laptops
+  // with unusually short viewports without spilling over another panel.
+  const below=viewport.height-cursor.y-8;
+  const above=cursor.y-8;
+  flyout.style.maxHeight=Math.max(160,Math.min(viewport.height-16,
+    Math.max(below,above)))+"px";
+  flyout.style.overflowY="auto";
   const result=placeExtrudeMenu({
     viewport,cursor,
     popup:{width:flyout.offsetWidth||258,height:flyout.offsetHeight||315},
@@ -1483,7 +1496,8 @@ function placeHistoryTimeline():void{
   const target=byId(isLandscapeHistory()?"timeline-content":"history-inline-host");
   const list=byId("feature-list");
   if(list.parentElement!==target)target.append(list);
-  if(isLandscapeHistory())ensureHistoryThumbnails();
+  if(isLandscapeHistory()&&byId("preview").dataset.buildState==="ready")
+    ensureHistoryThumbnails();
 }
 window.addEventListener("resize",()=>{
   positionExtrudeMenu();placeHistoryTimeline();requestAnimationFrame(positionDockCluster);
