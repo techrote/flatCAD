@@ -1262,6 +1262,32 @@ test("axially twisted rectangle becomes valid exact solid; named twist persists"
   const bounds=JSON.parse((await page.locator("#status").getAttribute("data-bounds-mm"))!);
   expect(bounds[0][2]).toBeCloseTo(0,3);
   expect(bounds[1][2]).toBeCloseTo(8,3);
+  const pending=page.waitForEvent("download",{timeout:120000});
+  await openMenu(page,"file","file.step");
+  const exported=await pending;
+  const bytes=await readFile((await exported.path())!);
+  expect(bytes.subarray(0,300).toString()).toContain("ISO-10303-21");
+});
+
+test("negative signed axial twist creates a valid exact B-rep",async({page})=>{
+  await page.goto("/");
+  await newProject(page);
+  await page.keyboard.press("r");
+  await draw(page,[.37,.40],[.62,.62]);
+  await page.keyboard.press("e");
+  await page.locator("#extrude-z").fill("8");
+  await page.locator("#extrude-depth").fill("-6");
+  await page.locator("#extrude-direction-details summary").click();
+  await page.locator("#extrude-twist").fill("60");
+  await page.locator("#apply-extrude").click();
+  await expect(page.locator("#status")).toContainText("Exact solid generated",{timeout:120000});
+  const doc=await saveProject(page);
+  expect(doc.features[0]).toMatchObject({z:8,depth:-6,twist:60});
+  const bounds=JSON.parse((await page.locator("#status").getAttribute("data-bounds-mm"))!);
+  expect(bounds[0][2]).toBeCloseTo(2,3);
+  expect(bounds[1][2]).toBeCloseTo(8,3);
+  expect(Number(await page.locator("#status").getAttribute("data-volume-mm3")))
+    .toBeGreaterThan(0);
 });
 
 test("negative signed inclined cut generates full exact tool with no geometric mutation on preview cancel",async({page})=>{
