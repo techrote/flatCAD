@@ -436,3 +436,53 @@
 .render-effect-option{margin:8px 0 19px}
 #render-supersampling{width:100%;padding:10px;
   color:#e6f3ff;background:#112740;border:1px solid #436b8c;border-radius:5px}
+
+
+/* Up to three independent floating renders. Transparent areas remain
+ * noninteractive; their compact nav tiles explicitly accept pointer input. */
+.floating-views-layer{
+  position:fixed;inset:0;z-index:37;
+  pointer-events:none;overflow:hidden;isolation:isolate;
+}
+.floating-render-view{
+  position:absolute;width:min(380px,48vw);height:min(340px,50vh);
+  min-width:200px;min-height:180px;
+  background:transparent;border:1px solid rgba(115,166,204,.68);
+  border-radius:8px;box-shadow:0 0 0 1px #07162450,0 7px 19px #04121e50;
+  pointer-events:none;overflow:hidden;
+}
+.floating-render-canvas{position:absolute;inset:0;min-height:0!important;
+  background:transparent;pointer-events:none}
+.floating-render-canvas canvas{width:100%;height:100%;pointer-events:none}
+.floating-render-view .float-nav{display:flex}
+.float-face-label{position:absolute;z-index:39;pointer-events:none;
+  color:#e6f5ff;background:#172b40e9;border:1px solid #6396b9;
+  border-radius:5px;padding:5px 7px;
+  font:11px ui-monospace,monospace}
+.floating-render-view .float-face-label[hidden]{display:none!important}
+/* Hiding the ordinary Solid tile never closes independent floating views.
+ * In split mode the inspector takes its freed vertical space. */
+.workbench-layout.tiled-solid-hidden:not(.float-solid) .preview-panel,
+.workbench-layout.tiled-solid-hidden:not(.float-solid) .side-resizer{
+  display:none!important;
+}
+.workbench-layout.tiled-solid-hidden:not(.float-solid) .workbench-side{
+  grid-template-rows:minmax(0,1fr)!important;
+}
+.workbench-layout.tiled-solid-hidden:not(.float-solid) .inspector-drawer{
+  grid-row:1;min-height:0;overflow:auto;
+}
+@media(min-width:1101px){
+  .workbench .workbench-layout.three-tiles.tiled-solid-hidden{
+    grid-template-columns:minmax(0,var(--three-first,50%)) 8px minmax(0,1fr);
+  }
+  .workbench .workbench-layout.three-tiles.tiled-solid-hidden .workbench-sketch{
+    grid-column:var(--tile-sketch-visible-col,1);
+  }
+  .workbench .workbench-layout.three-tiles.tiled-solid-hidden .inspector-drawer{
+    grid-column:var(--tile-properties-visible-col,3);
+  }
+}
+.layout-tile-visibility{display:flex;gap:9px;align-items:center;
+  padding:12px 0 4px;color:#d2e4f5;font-size:12px}
+.layout-tile-visibility input{accent-color:#529ce8}

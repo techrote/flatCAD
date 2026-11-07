@@ -1281,3 +1281,108 @@ test("View/Layout/Render menu separation and optional AO/SSAA preserve source ge
   await expect(page.locator("#preview")).toHaveAttribute("data-ao-enabled","true");
   await expect(page.locator("#preview")).toHaveAttribute("data-supersample","1.5");
 });
+
+test("multiple floating renders preserve independent cameras and optionally hidden tiled Solid",async({page},testInfo)=>{
+  await page.setViewportSize({width:1500,height:860});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await openMenu(page,"view","view.float.new");
+  await openMenu(page,"view","view.float.new");
+  const views=page.locator("#floating-views-layer .floating-render-view");
+  await expect(views).toHaveCount(2);
+  await expect(views.locator(".floating-render-canvas[data-rendered-solid=true]"))
+    .toHaveCount(2);
+  await expect(page.locator(".preview-panel .solid-titlebar")).toBeVisible();
+  const first=views.nth(0),second=views.nth(1);
+  await first.locator('[data-nav="underground"]').click();
+  await expect(first.locator(".floating-render-canvas")).toHaveAttribute("data-home-mode","underground");
+  // The second view overlaps the first view's centre. Activating the first
+  // navigation tile must foreground its canvas before pointer interactions.
+  const firstZ=await first.evaluate(el=>Number((el as HTMLElement).style.zIndex));
+  const secondZ=await second.evaluate(el=>Number((el as HTMLElement).style.zIndex));
+  expect(firstZ).toBeGreaterThan(secondZ);
+  const d1=(await first.locator(".floating-render-canvas").getAttribute("data-camera-direction"))!
+    .split(",").map(Number);
+  const d2=(await second.locator(".floating-render-canvas").getAttribute("data-camera-direction"))!
+    .split(",").map(Number);
+  expect(d1[2]).toBeLessThan(0);
+  expect(d2[2]).toBeGreaterThan(0);
+  await page.screenshot({path:testInfo.outputPath("independent-floating-cameras.png")});
+  await openMenu(page,"layout","dialog.layout");
+  await page.locator("#tiled-solid-visible").uncheck();
+  await expect(page.locator("#workbench-layout")).toHaveClass(/tiled-solid-hidden/);
+  await expect(page.locator(".preview-panel")).toBeHidden();
+  await expect(views).toHaveCount(2);
+  await expect(first).toBeVisible();
+  await page.locator('[data-close="layout-dialog"]').last().click();
+  const coords=(await first.boundingBox())!;
+  const host=first.locator(".floating-render-canvas"),rect=(await host.boundingBox())!;
+  await page.mouse.move(rect.x+rect.width*.5,rect.y+rect.height*.5);
+  await expect(host).toHaveAttribute("data-float-hover","true");
+  await page.mouse.down();
+  await page.mouse.move(rect.x+rect.width*.5+45,rect.y+rect.height*.5+32,{steps:7});
+  await page.mouse.up();
+  const after=(await first.boundingBox())!;
+  expect(after.x).toBeGreaterThan(coords.x+20);
+  expect(after.y).toBeGreaterThan(coords.y+15);
+  await page.screenshot({path:testInfo.outputPath("dragged-view-and-hidden-tile.png")});
+  await page.reload();
+  await expect(views).toHaveCount(2);
+  // Foreground identity must also persist: an overlapping sibling must not
+  // swallow the reloaded active view's Close navigation control.
+  const restoredFirstZ=await views.first().evaluate(el=>Number((el as HTMLElement).style.zIndex));
+  const restoredSecondZ=await views.nth(1).evaluate(el=>Number((el as HTMLElement).style.zIndex));
+  expect(restoredFirstZ).toBeGreaterThan(restoredSecondZ);
+  const restored=(await views.first().boundingBox())!;
+  // Drag-end persistence is separate from the CAD document and must survive
+  // reload without synchronous localStorage writes during pointermove.
+  expect(Math.abs(restored.x-after.x)).toBeLessThan(3);
+  expect(Math.abs(restored.y-after.y)).toBeLessThan(3);
+  await expect(page.locator(".preview-panel")).toBeHidden();
+  await views.first().locator('[data-nav="close"]').click();
+  await expect(views).toHaveCount(1);
+  await openMenu(page,"view","view.solid.show");
+  await expect(page.locator(".preview-panel")).toBeVisible();
+  await expect(views).toHaveCount(1);
+});
+
+test("independent floating face click latches Start Z without moving viewport",async({page})=>{
+  await page.setViewportSize({width:1440,height:820});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await openMenu(page,"view","view.float.new");
+  const floating=page.locator("#floating-views-layer .floating-render-view").first();
+  const host=floating.locator(".floating-render-canvas");
+  await expect(host).toHaveAttribute("data-rendered-solid","true");
+  await page.locator("#profiles-details summary").click();
+  await page.locator("#profile-list .profile-item").nth(1).click();
+  await page.keyboard.press("e");
+  await expect(page.locator("#extrude-flyout")).toBeVisible();
+  await page.locator("#extrude-z").fill("0");
+  await page.locator("#extrude-z").focus();
+  const initial=(await floating.boundingBox())!;
+  const rect=(await host.boundingBox())!;
+  const x=rect.x+rect.width/2,y=rect.y+rect.height/2;
+  await page.mouse.move(x,y);
+  await expect(host).toHaveAttribute("data-float-hover","true");
+  await page.mouse.click(x,y);
+  await expect(page.locator("#extrude-z")).toHaveValue("8");
+  const after=(await floating.boundingBox())!;
+  expect(Math.abs(after.x-initial.x)+Math.abs(after.y-initial.y)).toBeLessThan(2);
+});
+
+test("independent floating views share render settings but not exact CAD geometry state",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await openMenu(page,"view","view.float.new");
+  const host=page.locator("#floating-views-layer .floating-render-canvas").first();
+  const originalVolume=await page.locator("#status").getAttribute("data-volume-mm3");
+  await openMenu(page,"render","dialog.render");
+  await page.locator("#render-ao").check();
+  await page.locator("#render-supersampling").selectOption("1.5");
+  await expect(host).toHaveAttribute("data-ao-enabled","true");
+  await expect(host).toHaveAttribute("data-supersample","1.5");
+  await page.locator('[data-close="render-dialog"]').last().click();
+  expect(await page.locator("#status").getAttribute("data-volume-mm3")).toBe(originalVolume);
+  await expect(page.locator(".preview-panel .preview-root")).toHaveAttribute("data-supersample","1.5");
+});
