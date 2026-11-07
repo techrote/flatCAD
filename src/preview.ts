@@ -5,6 +5,8 @@ import { dragAction, orbitControlsBinding, type NavigationPreset } from "./navig
 import { exactFaceElevation } from "./signed-extrusion";
 import { presentationGridZ } from "./display-grid";
 import type { SurfaceTarget } from "./surface-interaction";
+import { isHighlightableSurface, VERTEX_HOVER_RADIUS_PX,
+  worldRadiusForScreenPixels } from "./hover-policy";
 
 /** OpenCascade B-rep-derived display; face picking references COMMITTED geometry only. */
 export class Preview {
@@ -20,7 +22,7 @@ export class Preview {
   private hasFramedSolid=false;
   private topologyVertices: THREE.Vector3[] = [];
   /** Topological vertex hover has a matching visible green sphere diameter. */
-  private readonly vertexRadiusPx=17;
+  private readonly vertexRadiusPx=VERTEX_HOVER_RADIUS_PX;
   private hoveredHighlight: THREE.Mesh | null = null;
   private hoveredKey = "";
   private lastHovered: SurfaceTarget | null = null;
@@ -249,8 +251,8 @@ export class Preview {
       if(key===this.hoveredKey&&this.hoveredHighlight)return;
       this.clearHighlight();
       const bounds=this.renderer.domElement.getBoundingClientRect();
-      const radiusWorld=this.vertexRadiusPx*
-        (this.camera.top-this.camera.bottom)/this.camera.zoom/Math.max(1,bounds.height);
+      const radiusWorld=worldRadiusForScreenPixels(this.vertexRadiusPx,
+        this.camera.top-this.camera.bottom,this.camera.zoom,Math.max(1,bounds.height));
       const sphere=new THREE.Mesh(new THREE.SphereGeometry(radiusWorld,24,16),
         new THREE.MeshBasicMaterial({
           color:0x20f293,transparent:true,opacity:.37,
@@ -270,7 +272,7 @@ export class Preview {
       return;
     }
     // Side/sloped faces deliberately receive NO coloured overlay.
-    if(hit.target.z===null||Math.abs(hit.normal.z)<.995){
+    if(!isHighlightableSurface(hit.target)){
       this.clearHighlight();return;
     }
     const n=hit.normal;
