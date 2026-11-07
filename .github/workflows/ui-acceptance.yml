@@ -59,7 +59,7 @@ jobs:
       - name: Exercise real rendering, camera interaction and layout persistence
         env:
           FLATCAD_E2E_BROWSER: ${{ matrix.browser }}
-        run: npm run test:e2e -- --grep "floating|Float|viewport|history Cut|View/Layout/Render|idle Solid|three-column layout|resizing both dividers"
+        run: npm run test:e2e -- --grep "floating|Float|viewport|history Cut|View/Layout/Render|idle Solid|three-column layout|resizing both dividers|frame pacing"
       - name: Upload screenshots and browser traces
         if: always()
         uses: actions/upload-artifact@v4
