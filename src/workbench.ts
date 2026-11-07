@@ -12,6 +12,7 @@ import { depthToFace } from "./signed-extrusion";
 import { NAVIGATION_HINTS, NAVIGATION_LABELS, NAVIGATION_PRESETS, type NavigationPreset } from "./navigation";
 import type { KernelBuild, KernelHistoryFrame } from "./kernel-protocol";
 import { FeatureHistoryPanel } from "./history-panel";
+import { withoutCylinderSeams } from "./display-edges";
 import { WorkspaceLayoutController } from "./workspace-layout";
 import { featureForSurface, formatSurfaceTarget, type SurfaceTarget } from "./surface-interaction";
 import { SketchCanvas, type SketchTool } from "./sketch-canvas-v2";
@@ -474,7 +475,7 @@ function rebuild():void {
       if(extrudeTargets.length&&input("extrude-preview").checked){
         preview?.setCommittedPickMesh(result.mesh);
         scheduleOperationPreview();
-      }else preview?.setMesh(result.mesh);
+      }else preview?.setMesh(withoutCylinderSeams(result.mesh,snapshot));
       byId("preview").dataset.buildState="ready";
       if(byId<HTMLDetailsElement>("history-details").open)
         ensureHistoryThumbnails();
@@ -541,7 +542,7 @@ function restoreCommittedPreview():void {
   delete host.dataset.previewOperation;
   byId("solid-preview-status").hidden=true;
   if(committedBuild)
-    preview?.setMesh(committedBuild.mesh,{preserveCamera:true});
+    preview?.setMesh(withoutCylinderSeams(committedBuild.mesh,doc),{preserveCamera:true});
   setVolume(committedBuild?.statistics?.volumeMm3??null);
   // If a rebuild has not returned, keep displaying the previous valid mesh.
 }
@@ -745,7 +746,7 @@ function scheduleOperationPreview():void {
       const pendingIds=candidate.features.slice(source.features.length).map(f=>f.id);
       const result=await kernel.build(candidate,{cutToolFeatureIds:mode==="cut"?pendingIds:[]});
       if(token!==previewToken||doc!==source||!extrudeTargets.length||!input("extrude-preview").checked)return;
-      preview?.setMesh(result.mesh,{pending:mode,preserveCamera:true,
+      preview?.setMesh(withoutCylinderSeams(result.mesh,candidate),{pending:mode,preserveCamera:true,
         cutTool:result.cutTool?.mesh});
       setVolume(result.statistics?.volumeMm3??null,true);
       host.dataset.previewState="ready";

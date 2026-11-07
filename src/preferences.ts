@@ -24,8 +24,12 @@ export const DEFAULT_SHORTCUTS:Record<ShortcutAction,string>={
   "view.fit":"KeyF"
 };
 export type GridTier={label:string,enabled:boolean,spacing:number,color:string,snap:boolean};
+export const SKETCH_FONT_FAMILIES=["ui-monospace, Consolas, monospace","system-ui, sans-serif","Arial, sans-serif","Verdana, sans-serif","Georgia, serif"] as const;
+export type SketchTextPreferences={fontFamily:typeof SKETCH_FONT_FAMILIES[number];sizePx:number;weight:400|500|600|700};
+export const DEFAULT_SKETCH_TEXT:SketchTextPreferences={fontFamily:SKETCH_FONT_FAMILIES[0],sizePx:15,weight:500};
 export type Preferences={
   version:1;
+  sketchText:SketchTextPreferences;
   shortcuts:Record<ShortcutAction,string>;
   grid:{tiers:[GridTier,GridTier,GridTier],snapGeometry:boolean};
   polygon:{sides:number,rotation:number};
@@ -40,7 +44,8 @@ const defaultLayers: [GridTier,GridTier,GridTier]=[
 export function defaultPreferences():Preferences {
   return {version:1,shortcuts:{...DEFAULT_SHORTCUTS},
     grid:{tiers:defaultLayers.map(x=>({...x})) as [GridTier,GridTier,GridTier],snapGeometry:true},
-    polygon:{sides:6,rotation:-90},navigation:"fusion",rememberSurfaces:true};
+    polygon:{sides:6,rotation:-90},navigation:"fusion",rememberSurfaces:true,
+    sketchText:{...DEFAULT_SKETCH_TEXT}};
 }
 const codes=/^(?:(?:Control|Alt|Shift|Meta)\+)*(?:Key[A-Z]|Digit[0-9]|Arrow(?:Up|Down|Left|Right)|Space|Escape|Delete|Backspace|Enter|Tab|F(?:[1-9]|1[0-2]))$/;
 const allowedActions=Object.keys(ACTION_LABELS) as ShortcutAction[];
@@ -101,9 +106,17 @@ export function validatePreferences(source:unknown):Preferences {
   if(!validNavigationPreset(navigation))throw new Error("Unknown CAD navigation preset");
   const rememberSurfaces=source.rememberSurfaces===undefined?true:source.rememberSurfaces;
   if(typeof rememberSurfaces!=="boolean")throw new Error("Invalid remember-surfaces preference");
+  const textStyle=source.sketchText===undefined?DEFAULT_SKETCH_TEXT:source.sketchText;
+  if(!isRecord(textStyle)||
+    !SKETCH_FONT_FAMILIES.includes(textStyle.fontFamily as typeof SKETCH_FONT_FAMILIES[number])||
+    !Number.isInteger(textStyle.sizePx)||(textStyle.sizePx as number)<10||(textStyle.sizePx as number)>32||
+    ![400,500,600,700].includes(textStyle.weight as number))
+    throw new Error("Invalid sketch text style");
   return {version:1,shortcuts,grid:{tiers,snapGeometry:source.grid.snapGeometry},
     polygon:{sides:source.polygon.sides as number,rotation:source.polygon.rotation},
-    navigation,rememberSurfaces};
+    navigation,rememberSurfaces,
+    sketchText:{fontFamily:textStyle.fontFamily as SketchTextPreferences["fontFamily"],
+      sizePx:textStyle.sizePx as number,weight:textStyle.weight as SketchTextPreferences["weight"]}};
 }
 export const PREFS_KEY="flatcad.preferences.v1";
 export function loadPreferences():Preferences {
