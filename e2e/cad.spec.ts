@@ -978,3 +978,61 @@ test("three-column layout reorders Properties between Sketch and Solid",async({p
   await expect(page.locator("#workbench-layout")).toHaveClass(/three-tiles/);
   expect(await x(".inspector-drawer")).toBeLessThan(await x(".workbench-sketch"));
 });
+
+test("named-parameter chains bind exact sketch dimensions and persist in native project",async({page})=>{
+  await page.setViewportSize({width:1440,height:820});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await openMenu(page,"model","dialog.parameters");
+  await page.locator("#parameter-add").click();
+  await page.getByLabel("Parameter name param1").fill("plateWidth");
+  await page.getByLabel("Parameter name param1").press("Tab");
+  await page.getByLabel("Parameter expression plateWidth").fill("120");
+  await page.getByLabel("Parameter expression plateWidth").press("Tab");
+  await page.locator('[data-param-close]').last().click();
+  await page.locator("#profile-list .profile-item").first().click();
+  await page.locator("#properties-details summary").click();
+  const width=page.locator('[data-binding-target="profile:plate:width"]');
+  await expect(width).toHaveValue("100");
+  await width.fill("plateWidth");
+  await width.press("Tab");
+  await expect(width).toHaveValue("plateWidth");
+  await expect(width).toHaveAttribute("data-expression","true");
+  const saved=await saveProject(page);
+  expect(saved.parameters).toEqual([{name:"plateWidth",expression:"120"}]);
+  expect(saved.bindings).toContainEqual({target:"profile:plate:width",expression:"plateWidth"});
+  expect(saved.profiles[0].width).toBe(120);
+  await openMenu(page,"model","dialog.parameters");
+  await page.getByLabel("Parameter expression plateWidth").fill("140");
+  await page.getByLabel("Parameter expression plateWidth").press("Tab");
+  await page.locator('[data-param-close]').last().click();
+  await expect(page.locator("#status")).toContainText("Exact solid generated",{timeout:120000});
+  const updated=await saveProject(page);
+  expect(updated.profiles[0].width).toBe(140);
+  expect(updated.features).toHaveLength(3);
+  expect(updated.bindings).toContainEqual({target:"profile:plate:width",expression:"plateWidth"});
+  await page.locator("#undo").click();
+  const undone=await saveProject(page);
+  expect(undone.profiles[0].width).toBe(120);
+});
+
+test("named formulas in extrusion fields bind signed Z/depth and reject unknown inputs",async({page})=>{
+  await page.goto("/");
+  await openMenu(page,"model","dialog.parameters");
+  await page.locator("#parameter-add").click();
+  await page.getByLabel("Parameter name param1").fill("rise");
+  await page.getByLabel("Parameter name param1").press("Tab");
+  await page.getByLabel("Parameter expression rise").fill("8/2");
+  await page.getByLabel("Parameter expression rise").press("Tab");
+  await page.locator('[data-param-close]').last().click();
+  await page.locator("#profile-list .profile-item").first().click();
+  await page.keyboard.press("e");
+  await expect(page.locator("#extrude-flyout")).toBeVisible();
+  await page.locator("#extrude-depth").fill("rise+2");
+  await page.locator("#apply-extrude").click();
+  const data=await saveProject(page);
+  const recent=data.features.at(-1);
+  expect(recent.depth).toBe(6);
+  expect(data.bindings).toContainEqual({
+    target:"feature:"+recent.id+":depth",expression:"rise+2"});
+});
