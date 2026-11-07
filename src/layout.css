@@ -412,3 +412,20 @@
 @media(min-width:1101px){
   .workbench-layout.float-solid .workbench-side{display:grid}
 }
+
+/* Optional shaping controls stay hidden until requested by the user. */
+.extrude-direction-details{
+  border-top:1px solid #3c536f;
+  border-bottom:1px solid #3c536f;
+  padding:7px 0;
+}
+.extrude-direction-details summary,.history-direction summary{
+  color:#bcd7ec;cursor:pointer;font-size:11px;
+}
+.extrude-direction-details[open] summary{margin-bottom:9px}
+.extrude-direction-details .field-row{gap:7px;margin-bottom:6px}
+.extrude-direction-details .field{min-width:0}
+.extrude-direction-details input{width:100%}
+.history-direction{margin-top:8px}
+.history-direction .field-row{margin-top:8px;flex-wrap:wrap;gap:6px}
+.history-direction .field{min-width:70px}

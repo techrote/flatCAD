@@ -20,3 +20,22 @@ describe("signed extrusion semantics",()=>{
     expect(exactFaceElevation(4.5,[0,2,8])).toBeNull();
   });
 });
+
+import {validateDocument,DEMO} from "./model";
+describe("angled and twisted feature schema",()=>{
+  it("retains directional metadata and signed depths",()=>{
+    const doc=validateDocument({...DEMO,features:DEMO.features.map((f,i)=>
+      i===0?{...f,tiltX:12,tiltY:-8}:i===1?{...f,twist:45}:f)});
+    expect(doc.features[0]).toMatchObject({tiltX:12,tiltY:-8,depth:8});
+    expect(doc.features[1]).toMatchObject({twist:45,operation:"cut"});
+    expect(validateDocument(JSON.parse(JSON.stringify(doc)))).toEqual(doc);
+  });
+  it("rejects non-finite, extreme or mixed direction types",()=>{
+    const changed=(mod:Record<string,unknown>)=>({...DEMO,features:DEMO.features.map((f,i)=>
+      i===0?{...f,...mod}:f)});
+    expect(()=>validateDocument(changed({tiltX:NaN}))).toThrow("tiltX");
+    expect(()=>validateDocument(changed({tiltY:90}))).toThrow("tiltY");
+    expect(()=>validateDocument(changed({twist:900}))).toThrow("twist");
+    expect(()=>validateDocument(changed({tiltX:10,twist:45}))).toThrow("combined");
+  });
+});

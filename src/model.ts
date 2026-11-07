@@ -10,7 +10,12 @@ export type PathProfile = { id:string; kind:"path"; points:Point2[]; closed:bool
 export type SlotProfile = { id:string; kind:"slot"; x1:number; y1:number; x2:number; y2:number; radius:number };
 export type Profile = Rectangle | Circle | PolygonProfile | PathProfile | SlotProfile;
 /** z is the start plane in mm; signed depth is the Z displacement to the end plane. */
-export type Feature = { id:string; profileId:string; operation:"add"|"cut"; z:number; depth:number };
+export type Feature = { id:string; profileId:string; operation:"add"|"cut"; z:number; depth:number;
+  /** Inclination of the swept XY section along X and Y over signed Z; degrees. */
+  tiltX?:number;tiltY?:number;
+  /** Total axial twist around the authored XY profile's centre, degrees. */
+  twist?:number;
+};
 export type CadDocument = { schemaVersion:2; name:string; units:"mm"; profiles:Profile[]; features:Feature[];
   /** Optional v2-compatible exact named scalar formulas and numeric bindings. */
   parameters?:NamedParameter[];bindings?:ValueBinding[]; };
@@ -102,7 +107,22 @@ export function validateDocument(input: unknown): CadDocument {
     failUnless(coordinate(f.z) && coordinate(f.depth) && f.depth !== 0 &&
       Math.abs(f.depth)<=LIMIT && Math.abs(f.z + f.depth) <= LIMIT,
       "invalid feature Z/depth (must be non-zero, signed and finite)");
-    return { id: f.id, profileId: f.profileId, operation: f.operation, z: f.z, depth: f.depth };
+    for(const key of ["tiltX","tiltY","twist"] as const){
+      if(f[key]!==undefined){
+        const v=f[key];
+        failUnless(coordinate(v),key+" must be finite");
+        failUnless(Math.abs(v as number)<=((key==="twist")?720:65),
+          key+" exceeds qualified angle limit");
+      }
+    }
+    const tiltX=(f.tiltX??0) as number,tiltY=(f.tiltY??0) as number;
+    const twist=(f.twist??0) as number;
+    failUnless(!(twist!==0&&(tiltX!==0||tiltY!==0)),
+      "combined inclined and twisted sweeps are not yet supported");
+    return { id: f.id, profileId: f.profileId, operation: f.operation, z: f.z, depth: f.depth,
+      ...(f.tiltX!==undefined?{tiltX:f.tiltX as number}:{}),
+      ...(f.tiltY!==undefined?{tiltY:f.tiltY as number}:{}),
+      ...(f.twist!==undefined?{twist:f.twist as number}:{}) };
   });
   const result:CadDocument={schemaVersion:2,name:input.name,units:"mm",profiles,features};
   if(input.parameters!==undefined||input.bindings!==undefined){

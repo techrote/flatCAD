@@ -912,8 +912,11 @@ test("landscape timeline runs oldest first; only selected tile shows controls",a
   await expect(history.locator(".history-tiles select")).toHaveCount(0);
   await tiles.first().click();
   await expect(history.locator("#history-feature-editor")).toBeVisible();
-  await expect(history.locator("#history-feature-editor input")).toHaveCount(2);
+  await expect(history.locator("#history-feature-editor > .field-row input")).toHaveCount(2);
   await expect(history.locator("#history-feature-editor select")).toHaveCount(1);
+  // Optional angle/twist controls are present but collapsed by default.
+  await expect(history.locator(".history-direction")).not.toHaveAttribute("open",/./);
+  await expect(history.locator(".history-direction input")).toHaveCount(3);
   await expect(tiles.first()).toHaveAttribute("aria-pressed","true");
   await tiles.nth(1).click();
   await expect(tiles.nth(1)).toHaveAttribute("aria-pressed","true");
@@ -1212,4 +1215,128 @@ test("rotation tool edits sketch geometry around element centre and survives nat
   const volume=Number(await page.locator("#status").getAttribute("data-volume-mm3"));
   const data=await saveProject(page);
   expect(volume).toBeCloseTo(data.profiles[0].width*data.profiles[0].height*8,4);
+});
+
+test("inclined add extrusion uses exact B-rep with unchanged Z interval and volume",async({page})=>{
+  await page.goto("/");
+  await newProject(page);
+  await page.keyboard.press("r");
+  await draw(page,[.38,.40],[.59,.62]);
+  await page.keyboard.press("e");
+  await expect(page.locator("#extrude-flyout")).toBeVisible();
+  await page.locator("#extrude-direction-details summary").click();
+  await page.locator("#extrude-tilt-x").fill("20");
+  await page.locator("#extrude-tilt-y").fill("-10");
+  await page.locator("#apply-extrude").click();
+  await expect(page.locator("#status")).toContainText("Exact solid generated",{timeout:120000});
+  const original=await saveProject(page);
+  const feature=original.features[0];
+  expect(feature).toMatchObject({operation:"add",depth:8,tiltX:20,tiltY:-10});
+  const bounds=JSON.parse((await page.locator("#status").getAttribute("data-bounds-mm"))!);
+  expect(bounds[0][2]).toBeCloseTo(0,4);
+  expect(bounds[1][2]).toBeCloseTo(8,4);
+  const volume=Number(await page.locator("#status").getAttribute("data-volume-mm3"));
+  expect(volume).toBeCloseTo(original.profiles[0].width*original.profiles[0].height*8,3);
+  const pending=page.waitForEvent("download",{timeout:120000});
+  await openMenu(page,"file","file.step");
+  const step=await pending;
+  const bytes=await readFile((await step.path())!);
+  expect(bytes.subarray(0,300).toString()).toContain("ISO-10303-21");
+  expect(bytes.length).toBeGreaterThan(3000);
+});
+
+test("axially twisted rectangle becomes valid exact solid; named twist persists",async({page})=>{
+  await page.goto("/");
+  await newProject(page);
+  await page.keyboard.press("r");
+  await draw(page,[.37,.41],[.62,.61]);
+  await page.keyboard.press("e");
+  await page.locator("#extrude-direction-details summary").click();
+  await page.locator("#extrude-twist").fill("90");
+  await page.locator("#apply-extrude").click();
+  await expect(page.locator("#status")).toContainText("Exact solid generated",{timeout:120000});
+  const doc=await saveProject(page);
+  expect(doc.features[0]).toMatchObject({operation:"add",z:0,depth:8,twist:90});
+  const volume=Number(await page.locator("#status").getAttribute("data-volume-mm3"));
+  expect(volume).toBeGreaterThan(0);
+  const bounds=JSON.parse((await page.locator("#status").getAttribute("data-bounds-mm"))!);
+  expect(bounds[0][2]).toBeCloseTo(0,3);
+  expect(bounds[1][2]).toBeCloseTo(8,3);
+  const pending=page.waitForEvent("download",{timeout:120000});
+  await openMenu(page,"file","file.step");
+  const exported=await pending;
+  const bytes=await readFile((await exported.path())!);
+  expect(bytes.subarray(0,300).toString()).toContain("ISO-10303-21");
+});
+
+test("negative signed axial twist creates a valid exact B-rep",async({page})=>{
+  await page.goto("/");
+  await newProject(page);
+  await page.keyboard.press("r");
+  await draw(page,[.37,.40],[.62,.62]);
+  await page.keyboard.press("e");
+  await page.locator("#extrude-z").fill("8");
+  await page.locator("#extrude-depth").fill("-6");
+  await page.locator("#extrude-direction-details summary").click();
+  await page.locator("#extrude-twist").fill("60");
+  await page.locator("#apply-extrude").click();
+  await expect(page.locator("#status")).toContainText("Exact solid generated",{timeout:120000});
+  const doc=await saveProject(page);
+  expect(doc.features[0]).toMatchObject({z:8,depth:-6,twist:60});
+  const bounds=JSON.parse((await page.locator("#status").getAttribute("data-bounds-mm"))!);
+  expect(bounds[0][2]).toBeCloseTo(2,3);
+  expect(bounds[1][2]).toBeCloseTo(8,3);
+  expect(Number(await page.locator("#status").getAttribute("data-volume-mm3")))
+    .toBeGreaterThan(0);
+});
+
+test("negative signed inclined cut generates full exact tool with no geometric mutation on preview cancel",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await page.locator("#profiles-details summary").click();
+  await page.locator("#profile-list .profile-item").nth(1).click();
+  await page.keyboard.press("e");
+  await page.locator("#extrude-mode").selectOption("cut");
+  await page.locator("#extrude-z").fill("8");
+  await page.locator("#extrude-depth").fill("-10");
+  await page.locator("#extrude-direction-details summary").click();
+  await page.locator("#extrude-tilt-x").fill("10");
+  await expect(page.locator("#preview")).toHaveAttribute("data-preview-state","ready",{timeout:120000});
+  await expect(page.locator("#preview")).toHaveAttribute("data-cut-tool-visible","true");
+  const tool=JSON.parse((await page.locator("#preview").getAttribute("data-cut-tool-bounds-mm"))!);
+  expect(tool[0][2]).toBeCloseTo(-2,3);
+  expect(tool[1][2]).toBeCloseTo(8,3);
+  await page.locator("#apply-extrude").click();
+  await expect(page.locator("#status")).toContainText("Exact solid generated",{timeout:120000});
+  const doc=await saveProject(page);
+  const latest=doc.features.at(-1);
+  expect(latest).toMatchObject({operation:"cut",z:8,depth:-10,tiltX:10});
+});
+
+test("axially twisted cutter subtracts real B-rep material and exports STEP",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const originalVolume=Number(await page.locator("#status").getAttribute("data-volume-mm3"));
+  await page.keyboard.press("r");
+  await draw(page,[.47,.45],[.56,.55]);
+  await page.keyboard.press("e");
+  await expect(page.locator("#extrude-flyout")).toBeVisible();
+  await page.locator("#extrude-mode").selectOption("cut");
+  await page.locator("#extrude-direction-details summary").click();
+  await page.locator("#extrude-twist").fill("45");
+  await expect(page.locator("#preview")).toHaveAttribute("data-preview-state","ready",{timeout:120000});
+  await expect(page.locator("#preview")).toHaveAttribute("data-cut-tool-visible","true");
+  const toolVolume=Number(await page.locator("#preview").getAttribute("data-cut-tool-volume-mm3"));
+  expect(toolVolume).toBeGreaterThan(0);
+  await page.locator("#apply-extrude").click();
+  await expect(page.locator("#status")).toContainText("Exact solid generated",{timeout:120000});
+  const after=Number(await page.locator("#status").getAttribute("data-volume-mm3"));
+  expect(after).toBeLessThan(originalVolume);
+  const result=await saveProject(page);
+  expect(result.features.at(-1)).toMatchObject({operation:"cut",twist:45});
+  const pending=page.waitForEvent("download",{timeout:120000});
+  await openMenu(page,"file","file.step");
+  const exported=await pending;
+  const bytes=await readFile((await exported.path())!);
+  expect(bytes.subarray(0,300).toString()).toContain("ISO-10303-21");
 });
