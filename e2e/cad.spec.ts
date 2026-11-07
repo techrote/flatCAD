@@ -1019,6 +1019,9 @@ test("portrait history retains newest-first even after switching out of timeline
     .toEqual(["Extrude · Rectangle 1","Cut · Circle 1","Cut · Circle 2"]);
   await page.setViewportSize({width:760,height:850});
   await expect(portrait).toBeVisible();
+  // Media-query visibility may update before the asynchronous resize event
+  // moves the same history list back from the landscape timeline container.
+  await expect(portrait.locator(".history-feature-name")).toHaveCount(3);
   expect(await portrait.locator(".history-feature-name").allTextContents())
     .toEqual(["Cut · Circle 2","Cut · Circle 1","Extrude · Rectangle 1"]);
 });
