@@ -3,7 +3,7 @@ import opencascade from "replicad-opencascadejs";
 import wasmUrl from "replicad-opencascadejs/wasm?url";
 import { Sketcher } from "replicad";
 import { setOC, sketchRectangle, sketchCircle, measureVolume, type Shape3D } from "replicad";
-import { polygonPoints } from "./geometry";
+import { polygonPoints, outline } from "./geometry";
 import { signedInterval } from "./signed-extrusion";
 import { validateDocument, type Feature, type Profile } from "./model";
 import type { KernelRequest, KernelResponse, GeometryMesh, KernelStatistics,
@@ -32,9 +32,14 @@ function makeTool(profile: Profile, feature: Feature): Shape3D {
   if (profile.kind === "rectangle") {
     const cx = profile.x + profile.width / 2;
     const cy = profile.y + profile.height / 2;
-    return sketchRectangle(profile.width, profile.height, {
-      ...planeConfig, origin: [cx, cy, originZ]
+    if(!profile.rotation)return sketchRectangle(profile.width, profile.height,{
+      ...planeConfig,origin:[cx,cy,originZ]
     }).extrude(height);
+    const corners=outline(profile);
+    const rotated=new Sketcher("XY",[0,0,originZ])
+      .movePointerTo([corners[0].x,corners[0].y]);
+    for(const point of corners.slice(1))rotated.lineTo([point.x,point.y]);
+    return rotated.close().extrude(height);
   }
   if (profile.kind === "circle") {
     return sketchCircle(profile.radius, {
