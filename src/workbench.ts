@@ -9,7 +9,8 @@ import { nextSelection, selectedProfiles, suggestGroupOperation, documentWithExt
 import { placeExtrudeMenu } from "./extrude-placement";
 import { depthToFace } from "./signed-extrusion";
 import { NAVIGATION_HINTS, NAVIGATION_LABELS, NAVIGATION_PRESETS, type NavigationPreset } from "./navigation";
-import type { KernelBuild } from "./kernel-protocol";
+import type { KernelBuild, KernelHistoryFrame } from "./kernel-protocol";
+import { FeatureHistoryPanel } from "./history-panel";
 import { featureForSurface, formatSurfaceTarget, type SurfaceTarget } from "./surface-interaction";
 import { SketchCanvas, type SketchTool } from "./sketch-canvas-v2";
 import { KernelClient } from "./kernel-client";
@@ -87,7 +88,7 @@ root.innerHTML=[
   '    </section>',
   '    <aside class="workbench-side">',
   '      <section class="panel preview-panel">',
-  '        <div class="panel-head compact-head"><div class="header-label"><span class="panel-index">02</span><div><strong>Solid</strong><small>Orbit · zoom · inspect</small></div></div><span class="chip">Z ↑</span></div>',
+  '        <div class="panel-head compact-head"><div class="header-label"><span class="panel-index">02</span><div><strong>Solid</strong><small>Orbit · zoom · inspect</small></div></div><div class="solid-view-actions"><button id="fit-solid" class="text-button" title="Fit solid (F)">⊞ Fit <kbd>F</kbd></button><span class="chip">Z ↑</span></div></div>',
   '        <div id="preview" class="preview-root"><span class="placeholder">Loading 3D preview…</span></div>',
   '        <span id="face-target-label" class="face-target-label" hidden></span>',
   '        <div id="face-context-menu" class="face-context-menu" role="menu" hidden></div>',
@@ -154,12 +155,23 @@ let contextFeatureId:string|null=null;
 let previewEnabled=true,previewToken=0,previewInFlight=false;
 let previewTimer:ReturnType<typeof setTimeout>|undefined;
 let committedBuild:KernelBuild|null=null;
+let historySnapshotDoc:CadDocument|null=null;
+let historyFrames:KernelHistoryFrame[]|null=null;
+let thumbnailsRequestedFor:CadDocument|null=null;
+let thumbnailToken=0;
 let shortcutRecording:ShortcutAction|null=null;
 let lastStats:{volumeMm3:number,boundsMm:[[number,number,number],[number,number,number]]}|null=null;
 let generation=0,buildTimer:ReturnType<typeof setTimeout>|undefined;
 let slotRadius=3;
 
 const kernel=new KernelClient();
+const historyPanel=new FeatureHistoryPanel(
+  byId("feature-list"),
+  feature=>safe(()=>updateFeature(feature)),
+  feature=>safe(()=>change(validateDocument({
+    ...doc,features:doc.features.filter(f=>f.id!==feature.id)
+  })))
+);
 const canvas=new SketchCanvas(inputCanvas(),doc,prefs,{
   onCreate:p=>safe(()=>{selectedId=p.id;selectedIds=[p.id];change(appendProfile(doc,p));setTool("select");}),
   onCreateMany:profiles=>safe(()=>{
@@ -355,29 +367,28 @@ function renderProfileList():void{
   if(!doc.profiles.length)target.textContent="Empty sketch — draw a profile.";
 }
 function renderHistory():void{
-  const target=byId("feature-list");target.replaceChildren();
-  if(!doc.features.length){target.textContent="No solid features yet. Select a shape and press E.";return;}
-  for(const f of doc.features){
-    const row=document.createElement("div");row.className="history-row";
-    const header=document.createElement("strong");
-    header.textContent=(f.operation==="add"?"+ ":"− ")+f.profileId.slice(0,12);
-    row.append(header);
-    const fields=document.createElement("div");fields.className="field-row";
-    const mode=document.createElement("select");mode.setAttribute("aria-label","Feature operation");
-    for(const operation of ["add","cut"] as const){
-      const option=document.createElement("option");option.value=operation;
-      option.textContent=operation==="add"?"Add":"Cut";option.selected=f.operation===operation;mode.add(option);
-    }
-    mode.onchange=()=>safe(()=>updateFeature({...f,operation:mode.value as "add"|"cut"}));
-    fields.append(mode);
-    fields.append(numField("Start Z",f.z,n=>updateFeature({...f,z:n})));
-    fields.append(numField("Depth",f.depth,n=>updateFeature({...f,depth:n})));
-    const remove=document.createElement("button");remove.className="delete-feature";remove.title="Delete operation";
-    remove.textContent="×";remove.onclick=()=>safe(()=>change(validateDocument({
-      ...doc,features:doc.features.filter(x=>x.id!==f.id)
-    })));
-    row.append(fields,remove);target.append(row);
-  }
+  historyPanel.render(doc,historySnapshotDoc===doc?historyFrames:null);
+}
+/** Generate the exact post-feature B-rep thumbnails on demand, separately
+ * from the primary Solid build. A blocked thumbnail request cannot blank
+ * the main canvas or reset the camera. */
+function ensureHistoryThumbnails():void{
+  if(!byId<HTMLDetailsElement>("history-details").open||
+    !doc.features.length||historySnapshotDoc===doc||
+    thumbnailsRequestedFor===doc)return;
+  const snapshot=doc,token=++thumbnailToken;
+  thumbnailsRequestedFor=snapshot;
+  void kernel.build(snapshot,{includeHistory:true}).then(result=>{
+    if(token!==thumbnailToken||doc!==snapshot)return;
+    historyFrames=result.historyFrames;
+    historySnapshotDoc=snapshot;
+    renderHistory();
+  }).catch(error=>{
+    if(token!==thumbnailToken||doc!==snapshot)return;
+    status("Feature thumbnail rendering failed: "+String(error),true);
+  }).finally(()=>{
+    if(thumbnailsRequestedFor===snapshot)thumbnailsRequestedFor=null;
+  });
 }
 function updateFeature(feature:Feature):void{
   change(validateDocument({...doc,features:doc.features.map(f=>f.id===feature.id?feature:f)}));
@@ -403,10 +414,14 @@ function duplicateSelected():void {
 function rebuild():void {
   const n=++generation;
   ++previewToken;
+  ++thumbnailToken;
   clearTimeout(previewTimer);
   clearTimeout(buildTimer);
-  committedBuild=null;
+  // Keep the last valid B-rep on screen during asynchronous regeneration.
+  // Clearing committedBuild before a new result caused the empty flashes.
   const snapshot=doc;
+  byId("preview").dataset.buildState="rebuilding";
+  byId("preview").dataset.lastValidVisible=committedBuild?.mesh?"true":"false";
   status(snapshot.features.length?"Regenerating exact solid…":"Sketch ready · press E on a closed shape");
   buildTimer=setTimeout(async()=>{
     try{
@@ -415,9 +430,13 @@ function rebuild():void {
       lastStats=result.statistics;
       committedBuild=result;
       preview?.setFaceElevations(snapshot.features.flatMap(f=>[f.z,f.z+f.depth]));
-      preview?.setCommittedPickMesh(result.mesh);
-      if(extrudeTargets.length&&input("extrude-preview").checked) scheduleOperationPreview();
-      else preview?.setMesh(result.mesh);
+      if(extrudeTargets.length&&input("extrude-preview").checked){
+        preview?.setCommittedPickMesh(result.mesh);
+        scheduleOperationPreview();
+      }else preview?.setMesh(result.mesh);
+      byId("preview").dataset.buildState="ready";
+      if(byId<HTMLDetailsElement>("history-details").open)
+        ensureHistoryThumbnails();
       if(result.statistics){
         byId("status").dataset.volumeMm3=String(result.statistics.volumeMm3);
         byId("status").dataset.boundsMm=JSON.stringify(result.statistics.boundsMm);
@@ -429,10 +448,10 @@ function rebuild():void {
         "Sketch ready · press E on a closed shape");
     }catch(error){
       if(n!==generation)return;
-      lastStats=null;committedBuild=null;
-      preview?.setCommittedPickMesh(null);preview?.setFaceElevations([]);
-      if(!extrudeTargets.length||!input("extrude-preview").checked)preview?.setMesh(null);
-      status("CAD build failed: "+String(error),true);
+      // An invalid edit does not erase the last successfully rendered solid.
+      byId("preview").dataset.buildState="stale";
+      byId("preview").dataset.lastValidVisible=committedBuild?.mesh?"true":"false";
+      status("CAD rebuild failed · showing last valid solid: "+String(error),true);
     }
   },180);
 }
@@ -480,7 +499,9 @@ function restoreCommittedPreview():void {
   delete host.dataset.previewVolumeMm3;
   delete host.dataset.previewOperation;
   byId("solid-preview-status").hidden=true;
-  preview?.setMesh(committedBuild?.mesh??null,{preserveCamera:true});
+  if(committedBuild)
+    preview?.setMesh(committedBuild.mesh,{preserveCamera:true});
+  // If a rebuild has not returned, keep displaying the previous valid mesh.
 }
 function closeExtrude():void {
   extrudeCursor=null;
@@ -845,7 +866,7 @@ const MENU:Record<string,[string,string][]> = {
    ["Duplicate selected","edit.duplicate"],["Delete selected","edit.delete"],["Exact properties","view.properties"]],
  model:[["Extrude / Cut (Auto)","feature.extrude"],["Add extrusion","model.add"],
    ["Subtract extrusion","model.cut"],["Feature history","view.history"]],
- view:[["Pan","tool.pan"],["Grid and snapping…","dialog.grid"],["Profile list","view.profiles"],
+ view:[["Pan","tool.pan"],["Fit Solid View","view.fit"],["Grid and snapping…","dialog.grid"],["Profile list","view.profiles"],
    ["Properties","view.properties"],["History","view.history"]],
  settings:[["Keyboard shortcuts…","dialog.shortcuts"],["Grid and snapping…","dialog.grid"],
    ["CAD navigation controls…","dialog.navigation"],
@@ -886,6 +907,7 @@ function command(action:string):void{
     case "view.properties":toggleDetails("properties-details");break;
     case "view.profiles":toggleDetails("profiles-details");break;
     case "view.history":toggleDetails("history-details");break;
+    case "view.fit":preview?.fitView();break;
     case "file.new":newProject();break;
     case "file.open":input("project-input").click();break;
     case "file.save":saveProject();break;
@@ -1026,6 +1048,11 @@ button("selection-delete").onclick=()=>safe(removeSelected);
 button("selection-duplicate").onclick=()=>safe(duplicateSelected);
 button("selection-properties").onclick=()=>toggleDetails("properties-details");
 button("grid-quick").onclick=showGrid;
+button("fit-solid").onclick=()=>preview?.fitView();
+byId<HTMLDetailsElement>("history-details").addEventListener("toggle",()=>{
+  if(byId<HTMLDetailsElement>("history-details").open)
+    ensureHistoryThumbnails();
+});
 button("cancel-extrude").onclick=closeExtrude;
 button("dismiss-extrude").onclick=closeExtrude;
 button("apply-extrude").onclick=applyExtrude;
@@ -1121,6 +1148,7 @@ document.addEventListener("keydown",event=>{
   const selectedShortcut=Object.entries(prefs.shortcuts).find(([,value])=>value===chord)?.[0];
   if(selectedShortcut){event.preventDefault();command(selectedShortcut);return;}
   if(chord==="Control+KeyY"){event.preventDefault();undoRedo(historyIndex+1);return;}
+  // Fit uses the normal user-configurable shortcut map, like other tools.
   if(chord==="Escape"){
     if(!byId("face-context-menu").hidden)hideSurfaceContext();
     else if(activeMenu)closeMenu();else setTool("select");return;

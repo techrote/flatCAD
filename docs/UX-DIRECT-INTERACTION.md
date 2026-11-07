@@ -137,3 +137,11 @@ Acceptance requires measuring actual changes to the camera-target translation an
 **Sketch background:** The canvas is explicitly nondraggable as a browser element (dragstart/selectstart prevented). Blank left-drag in Select mode cannot move the viewport. Middle-drag continues to pan, and an intentionally chosen Pan tool remains a visible alternative, with clearly separate input mode. Never treat a plain background drag as a selection of the grid.
 
 **Acceptance:** real browser tests for no background pan in Select, explicit middle pan, click–click rectangle/centre square/circle/polygon/slot, invalid first release, Escape cancel, and visual grid Z below both negative solids and cutting-tool overshoot. The screenshot issue is visual presentation; never "fix" it by changing OCC geometry.
+
+## Stable Solid camera, history cards and mouseover contrast (2026-11-07)
+
+The Solid camera is a persistent user view, not a side effect of modelling. After the first fit, any successful or failed add/cut, feature edit, cut preview or cancellation must preserve its direction, zoom and pan target. The user can select **Fit** or press F to explicitly recenter/reframe. Rebuilding geometry displays a busy status but keeps the last valid solid until replacement is accepted; invalid geometry displays a stale/error warning rather than a blank render.
+
+Feature History expands on demand. Each chronological entry names the operation and chosen sketch type/ordinal, and shows a thumbnail of the B-rep solid **after that feature**. A Cut entry includes its entire red cutter as an overlay, making overshoot visible. Numeric Z/depth and operation controls remain editable in the same entry. Rendering this drawer must not reset Solid camera pose or block a normal rebuild.
+
+Hover targeting deliberately distinguishes sketch and Solid operations. Highlight eligible horizontal face regions with high-contrast cyan, never colour vertical or sloped side faces. Real B-rep edge endpoints activate within a 17px radius and display a transparent green sphere of exactly the same apparent radius. Hover highlighting does not imply a stable persistent face identifier. It remains clear and does not write model parameters.

@@ -51,3 +51,15 @@ describe("remember interaction surfaces preference",()=>{
     expect(()=>validatePreferences({...defaultPreferences(),rememberSurfaces:"yes"})).toThrow();
   });
 });
+
+describe("Fit-view shortcut migration",()=>{
+  it("adds F to prior settings without losing existing rebinding",()=>{
+    const old=defaultPreferences();
+    delete (old.shortcuts as Partial<typeof old.shortcuts>)["view.fit"];
+    const migrated=validatePreferences(old);
+    expect(migrated.shortcuts["view.fit"]).toBe("KeyF");
+    old.shortcuts["tool.rectangle"]="KeyF";
+    expect(validatePreferences(old).shortcuts["view.fit"]).toBe("");
+    expect(validatePreferences(old).shortcuts["tool.rectangle"]).toBe("KeyF");
+  });
+});

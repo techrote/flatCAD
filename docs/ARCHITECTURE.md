@@ -55,3 +55,13 @@ M0 deliberately supports only independent analytic rectangles and circles. It do
 - Preview is replaceable without affecting saved geometry.
 - Undo/reopen must never silently mutate an accepted model.
 - A local static HTTP server is acceptable; a permanently running backend is not required.
+
+## ADR-0005: stable presentation and feature-history evidence (2026-11-07)
+
+**Problem:** `Preview.setMesh` previously removed the displayed group before constructing the replacement and fitted the camera on every committed rebuild. `rebuild()` also erased `committedBuild` before the asynchronous worker returned, so preview cancellation or a failed recompute could remove the last valid mesh and cause repeated blank flashes.
+
+**Solution:** construct a new Three.js display group before releasing the old group, and retain the last accepted `KernelBuild` through worker rebuilds. A failed recompute marks presentation stale but does not erase its last accepted solid. No successful operation changes camera pose after initial fitting. The explicit Fit action is the only subsequent reframing operation. Deleting every solid intentionally clears the viewport and resets initial framing for a new project. A status attribute records build state (`rebuilding`, `ready`, `stale`), not a new CAD model state.
+
+**History:** the worker can optionally capture the exact OpenCascade solid after each ordered feature, including a separate exact cutting tool for cuts. It produces B-rep-derived meshes and volume, while the native sketch/feature document stays authoritative. The browser generates small isometric Canvas2D snapshots (including red full-cutter overlay). This optional history task runs only when the drawer is opened and only after the main Solid has had a chance to update. Future releases should add incremental snapshot caching, viewport virtualization and workload limits for very long feature histories.
+
+**Hover:** model-edge endpoints from OCCT are distinguished from tessellation vertices in the geometry protocol. Mouse proximity uses a 17 CSS-pixel radius; the translucent green sphere is rendered at the matching apparent radius given current orthographic zoom and viewport size. Cyan face overlay is restricted to selectable horizontal planes with exact source elevation; side/sloped faces are excluded. This is NOT stable naming of OCC face identities, which remains separate work.

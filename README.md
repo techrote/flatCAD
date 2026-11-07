@@ -75,3 +75,11 @@ For rectangle, centre rectangle, circle, polygon and slot, you may **click once*
 The sketch background is not an HTML draggable object. Ordinary left-drag on a blank area in Select mode neither creates geometry nor moves the grid. Use explicit Pan tool or middle-drag for viewport navigation.
 
 The 3D reference grid is purely visual and is placed below the lowest displayed model/cutting-tool geometry to prevent apparent sinking through the grid. This never changes the authoritative XY sketch plane or saved CAD coordinates.
+
+## Stable Solid viewport and provenance thumbnails (candidate)
+
+The Solid camera maintains its azimuth/elevation, zoom and pan position across ordinary add/cut operations, feature edits, pending previews, cancel and successful/failed recomputations. The camera fits the first solid automatically; thereafter **Fit** (F or View → Fit Solid) is an explicit action. The previous valid solid remains visible during worker computations rather than flashing to blank; a failed rebuild reports an error while retaining the last valid display (which may be stale relative to the current parameters).
+
+Open the collapsed **Feature history** drawer to see one post-operation **OpenCascade B-rep-derived thumbnail** per feature. Captions are `Extrude · Rectangle 1`, `Cut · Circle 2`, etc. Cut thumbnail overlays the complete cutting tool in red, including Z overshoot. Thumbnails are generated separately from the primary Solid update and are not an alternative to exact source geometry. Large histories can take longer to generate.
+
+Only valid horizontal faces have the bright cyan hover overlay; side faces are not coloured. Actual CAD B-rep edge endpoints have a larger 17-pixel hover radius and an equally sized translucent green 3D sphere. These visual/topological coordinates do not create persistent CAD face/vertex references.

@@ -4,7 +4,7 @@ export type ShortcutAction =
   | "tool.select" | "tool.line" | "tool.rectangle" | "tool.centerRectangle"
   | "tool.circle" | "tool.polygon" | "tool.slot" | "tool.pan"
   | "feature.extrude" | "edit.delete" | "edit.duplicate"
-  | "edit.undo" | "edit.redo" | "file.save" | "dialog.shortcuts" | "dialog.grid";
+  | "edit.undo" | "edit.redo" | "file.save" | "dialog.shortcuts" | "dialog.grid" | "view.fit";
 export const ACTION_LABELS:Record<ShortcutAction,string>={
   "tool.select":"Select", "tool.line":"Line / polyline", "tool.rectangle":"Rectangle",
   "tool.centerRectangle":"Centre rectangle", "tool.circle":"Circle",
@@ -12,7 +12,7 @@ export const ACTION_LABELS:Record<ShortcutAction,string>={
   "feature.extrude":"Extrude / Cut", "edit.delete":"Delete selected",
   "edit.duplicate":"Duplicate selected", "edit.undo":"Undo", "edit.redo":"Redo",
   "file.save":"Save project", "dialog.shortcuts":"Keyboard shortcuts",
-  "dialog.grid":"Grid settings"
+  "dialog.grid":"Grid settings", "view.fit":"Fit Solid view"
 };
 export const DEFAULT_SHORTCUTS:Record<ShortcutAction,string>={
   "tool.select":"KeyV", "tool.line":"KeyL", "tool.rectangle":"KeyR",
@@ -20,7 +20,8 @@ export const DEFAULT_SHORTCUTS:Record<ShortcutAction,string>={
   "tool.polygon":"KeyP", "tool.slot":"KeyS", "tool.pan":"KeyM",
   "feature.extrude":"KeyE", "edit.delete":"Delete", "edit.duplicate":"Control+KeyD",
   "edit.undo":"Control+KeyZ", "edit.redo":"Control+Shift+KeyZ",
-  "file.save":"Control+KeyS", "dialog.shortcuts":"KeyK", "dialog.grid":"KeyG"
+  "file.save":"Control+KeyS", "dialog.shortcuts":"KeyK", "dialog.grid":"KeyG",
+  "view.fit":"KeyF"
 };
 export type GridTier={label:string,enabled:boolean,spacing:number,color:string,snap:boolean};
 export type Preferences={
@@ -70,7 +71,14 @@ export function validatePreferences(source:unknown):Preferences {
   const names=Object.keys(source.shortcuts);
   if(names.some(x=>!allowedActions.includes(x as ShortcutAction)))throw new Error("Unknown shortcut action");
   for(const action of allowedActions){
-    const input=source.shortcuts[action];
+    let input=source.shortcuts[action];
+    // Old preference JSON predates Fit. Migrate without overwriting a user
+    // who already assigned F to another action.
+    if(input===undefined&&action==="view.fit"){
+      input=Object.values(source.shortcuts).includes(DEFAULT_SHORTCUTS["view.fit"])
+        ?""
+        :DEFAULT_SHORTCUTS["view.fit"];
+    }
     if(typeof input!=="string")throw new Error("Shortcut missing for "+action);
     const chord=input===""?"":validateShortcut(input);
     if(chord&&used.has(chord))throw new Error("Duplicate shortcut: "+chord);

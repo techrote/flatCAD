@@ -669,3 +669,120 @@ test("Escape cancels pending two-click drawing without moving or committing back
   await page.mouse.click(b.x+b.width*.64,b.y+b.height*.61);
   await expect(page.locator("#profile-count")).toHaveText("0 profiles");
 });
+
+
+test("Solid camera orientation/zoom and old mesh stay stable across preview and committed operations",async({page})=>{
+  await page.goto("/");
+  const viewport=page.locator("#preview");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await expect(viewport).toHaveAttribute("data-rendered-solid","true");
+  await dragInSolid(page,"right");
+  await page.waitForTimeout(450); // settle damping before comparing stable pose
+  const getVector=async(attribute:string)=>
+    (await viewport.getAttribute(attribute)??"").split(",").map(Number);
+  const directionBefore=await getVector("data-camera-direction");
+  const zoomBefore=Number(await viewport.getAttribute("data-camera-zoom"));
+  const fitCount=Number(await viewport.getAttribute("data-camera-fit-count"));
+  expect(fitCount).toBeGreaterThan(0);
+  await page.evaluate(()=>{
+    const el=document.getElementById("preview")!;
+    (window as any).flatcadObservedBlanks=0;
+    new MutationObserver(()=>{
+      if(el.dataset.renderedSolid==="false") (window as any).flatcadObservedBlanks++;
+    }).observe(el,{attributes:true,attributeFilter:["data-rendered-solid"]});
+  });
+  await page.locator("#profiles-details summary").click();
+  await page.locator("#profile-list .profile-item").nth(1).click();
+  await page.keyboard.press("e");
+  await expect(viewport).toHaveAttribute("data-preview-state","ready",{timeout:120000});
+  await page.locator("#extrude-preview").uncheck();
+  await page.locator("#extrude-preview").check();
+  await expect(viewport).toHaveAttribute("data-preview-state","ready",{timeout:120000});
+  await page.locator("#apply-extrude").click();
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await expect(viewport).toHaveAttribute("data-build-state","ready");
+  const directionAfter=await getVector("data-camera-direction");
+  expect(Math.hypot(...directionAfter.map((v,i)=>v-directionBefore[i]))).toBeLessThan(.005);
+  expect(Number(await viewport.getAttribute("data-camera-zoom"))).toBeCloseTo(zoomBefore,6);
+  expect(Number(await viewport.getAttribute("data-camera-fit-count"))).toBe(fitCount);
+  expect(await page.evaluate(()=>(window as any).flatcadObservedBlanks)).toBe(0);
+  await page.locator("#fit-solid").click();
+  expect(Number(await viewport.getAttribute("data-camera-fit-count"))).toBe(fitCount+1);
+});
+
+test("Feature history has operation/sketch names and actual per-feature B-rep thumbnails with red cuts",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const history=page.locator("#history-details");
+  await history.locator("summary").click();
+  await expect(history.locator(".history-feature-card")).toHaveCount(3);
+  await expect(history.locator('.history-feature-card[data-thumbnail-state="ready"]'))
+    .toHaveCount(3,{timeout:120000});
+  const names=await history.locator(".history-feature-name").allTextContents();
+  expect(names).toEqual(["Extrude · Rectangle 1","Cut · Circle 1","Cut · Circle 2"]);
+  const thumbs=history.locator("canvas.history-thumbnail");
+  await expect(thumbs).toHaveCount(3);
+  await expect(thumbs.nth(0)).toHaveAttribute("data-cut-overlay","false");
+  await expect(thumbs.nth(1)).toHaveAttribute("data-cut-overlay","true");
+  await expect(thumbs.nth(2)).toHaveAttribute("data-cut-overlay","true");
+  const result=Number(await thumbs.nth(2).getAttribute("data-result-volume-mm3"));
+  const tool=Number(await thumbs.nth(2).getAttribute("data-tool-volume-mm3"));
+  expect(result).toBeGreaterThan(0);
+  expect(tool).toBeGreaterThan(0);
+  const pixels=await thumbs.nth(1).evaluate((canvas:HTMLCanvasElement)=>{
+    const ctx=canvas.getContext("2d")!;
+    const data=ctx.getImageData(0,0,canvas.width,canvas.height).data;
+    let reds=0;
+    for(let i=0;i<data.length;i+=4)
+      if(data[i]>150&&data[i]>data[i+1]*1.28&&data[i]>data[i+2]*1.1)reds++;
+    return reds;
+  });
+  expect(pixels).toBeGreaterThan(0);
+});
+
+test("Only horizontal faces highlight; true CAD vertex hit shows a same-radius green sphere",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const view=page.locator("#preview");
+  const count=Number(await view.getAttribute("data-topology-vertex-count"));
+  expect(count).toBeGreaterThan(3);
+  const xy=await view.evaluate((node:HTMLElement)=>{
+    const csv=(name:string)=>(node.dataset[name]||"").split(",").map(Number);
+    const d=csv("cameraDirection"), t=csv("cameraTarget");
+    const zoom=Number(node.dataset.cameraZoom);
+    const c=node.querySelector("canvas")!.getBoundingClientRect();
+    // Camera right = up × direction; camera screen-up = direction × right.
+    const length=(p:number[])=>Math.hypot(...p);
+    const normalize=(p:number[])=>p.map(v=>v/length(p));
+    const cross=(a:number[],b:number[])=>
+      [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+    const right=normalize(cross([0,0,1],d));
+    const up=normalize(cross(d,right));
+    const p=[50,-30,8],delta=p.map((v,i)=>v-t[i]);
+    const dot=(a:number[],b:number[])=>a.reduce((s,v,i)=>s+v*b[i],0);
+    const scale=zoom*c.height/100;
+    return {x:c.x+c.width/2+dot(delta,right)*scale,
+      y:c.y+c.height/2-dot(delta,up)*scale};
+  });
+  // The raycast source is exact OCCT geometry, but an inferred projected
+  // screen point may differ by a few pixels because of camera basis and
+  // CSS layout. Exercise a small neighborhood, still validating true
+  // pointer activation rather than setting any synthetic hover state.
+  let activated=false;
+  for(const dy of [0,-10,10,-20,20,-30,30]){
+    for(const dx of [0,-10,10,-20,20,-30,30]){
+      await page.mouse.move(xy.x+dx,xy.y+dy);
+      if(await view.getAttribute("data-vertex-sphere-visible")==="true"){
+        activated=true;break;
+      }
+    }
+    if(activated)break;
+  }
+  expect(activated).toBe(true);
+  await expect(view).toHaveAttribute("data-vertex-sphere-visible","true");
+  const hitRadius=Number(await view.getAttribute("data-vertex-hit-radius-px"));
+  const sphereRadius=Number(await view.getAttribute("data-vertex-sphere-radius-px"));
+  expect(hitRadius).toBeGreaterThan(12);
+  expect(sphereRadius).toBe(hitRadius);
+  await expect(view).toHaveAttribute("data-hovered-target-kind","vertex");
+});
