@@ -12,23 +12,28 @@ import type {SurfaceTarget} from "./surface-interaction";
 import {formatSurfaceTarget} from "./surface-interaction";
 import {Preview} from "./preview";
 import {createRenderNav} from "./render-nav";
+import {installFloatingFrame,positionedFloatRect,normalizedFloatRect,type FloatRect} from "./floating-frame";
 
 const STORAGE_KEY="flatcad.floating-views.v1";
 const ACTIVE_KEY="flatcad.floating-active.v1";
 export const MAX_FLOAT_VIEWS=3;
-export type FloatDescriptor={id:string;x:number;y:number};
+export type FloatDescriptor={id:string;x:number;y:number;w:number;h:number};
 export function validateFloatDescriptors(raw:unknown):FloatDescriptor[]{
   if(!Array.isArray(raw)||raw.length>MAX_FLOAT_VIEWS)throw Error("Invalid floating-view collection");
   const ids=new Set<string>();
   return raw.map((r:unknown)=>{
     if(!r||typeof r!=="object"||Array.isArray(r))throw Error("Invalid floating view");
     const d=r as Record<string,unknown>;
+    // The original preferences had only positions; migrate their sizes safely.
+    const w=d.w===undefined?380:d.w,h=d.h===undefined?340:d.h;
     if(typeof d.id!=="string"||!/^float_[a-z0-9]{6,24}$/.test(d.id)||
       ids.has(d.id)||typeof d.x!=="number"||!Number.isFinite(d.x)||
       typeof d.y!=="number"||!Number.isFinite(d.y)||
-      d.x<0||d.x>1||d.y<0||d.y>1)throw Error("Invalid floating view position");
+      d.x<0||d.x>1||d.y<0||d.y>1||typeof w!=="number"||!Number.isFinite(w)||
+      typeof h!=="number"||!Number.isFinite(h)||w<220||w>3000||h<180||h>3000)
+      throw Error("Invalid floating view position or size");
     ids.add(d.id);
-    return {id:d.id,x:d.x,y:d.y};
+    return {id:d.id,x:d.x,y:d.y,w,h};
   });
 }
 function load():FloatDescriptor[]{
@@ -37,7 +42,7 @@ function load():FloatDescriptor[]{
   catch{return [];}
 }
 type Entry={descriptor:FloatDescriptor;panel:HTMLElement;host:HTMLElement;
-  label:HTMLElement;preview:Preview;left:number;top:number};
+  label:HTMLElement;preview:Preview;disposeControls:()=>void};
 export class FloatRenderManager{
   readonly layer:HTMLElement;
   private readonly entries=new Map<string,Entry>();
@@ -75,7 +80,7 @@ export class FloatRenderManager{
     if(this.entries.size>=MAX_FLOAT_VIEWS)throw Error("Maximum of three independent floating views");
     const id="float_"+crypto.randomUUID().replaceAll("-","").slice(0,12);
     const descriptor={id,x:Math.min(.85,.48+this.entries.size*.08),
-      y:Math.min(.85,.22+this.entries.size*.11)};
+      y:Math.min(.85,.22+this.entries.size*.11),w:380,h:340};
     this.insert(descriptor,true);
     return id;
   }
@@ -83,6 +88,7 @@ export class FloatRenderManager{
     const e=this.entries.get(id);
     if(!e)return;
     this.entries.delete(id);
+    e.disposeControls();
     e.preview.dispose();
     e.panel.remove();
     this.persist();
@@ -146,16 +152,16 @@ export class FloatRenderManager{
       this.onError("Floating render unavailable: "+String(error));
       return;
     }
-    const entry:Entry={descriptor:{...descriptor},panel,host,label,preview,left:0,top:0};
+    const entry:Entry={descriptor:{...descriptor},panel,host,label,preview,disposeControls:()=>{}};
     this.entries.set(descriptor.id,entry);
-    // Navigation controls must foreground the selected view, otherwise a
-    // newer overlapping canvas can intercept an intended object drag.
-    // Keep DOM order stable so persisted descriptor identity is unchanged.
+    // Full viewport input ownership follows visual z-order, not raycast hits.
+    // Keep DOM order stable so persisted view identities never change.
     panel.addEventListener("pointerdown",()=>this.activate(entry),{capture:true});
     panel.addEventListener("focusin",()=>this.activate(entry));
     this.activate(entry,save);
-    preview.setFloatDragHandler((dx,dy)=>this.drag(entry,dx,dy));
-    preview.setFloatDragEndHandler(()=>this.persist());
+    entry.disposeControls=installFloatingFrame(panel,{
+      onChange:rect=>this.setRect(entry,rect),onEnd:()=>this.persist()
+    });
     preview.setSurfaceHoverHandler((target,pointer)=>this.onHover(entry,target,pointer));
     panel.append(createRenderNav(preview,()=>this.remove(descriptor.id)));
     this.position(entry);
@@ -184,27 +190,18 @@ export class FloatRenderManager{
     label.style.top=Math.max(40,Math.min(rect.height-35,pointer.y-rect.y+12))+"px";
     label.hidden=false;
   }
-  private maxPos(e:Entry):{minY:number;maxX:number;maxY:number}{
-    const minY=Math.min(65,Math.max(0,innerHeight-e.panel.offsetHeight));
-    return {minY,maxX:Math.max(0,innerWidth-e.panel.offsetWidth),
-      maxY:Math.max(minY,innerHeight-e.panel.offsetHeight)};
-  }
   private position(e:Entry):void{
-    const {minY,maxX,maxY}=this.maxPos(e);
-    e.left=Math.round(e.descriptor.x*maxX);
-    e.top=Math.round(minY+e.descriptor.y*(maxY-minY));
-    e.panel.style.left=e.left+"px";
-    e.panel.style.top=e.top+"px";
+    const rect=positionedFloatRect(e.descriptor.x,e.descriptor.y,
+      e.descriptor.w,e.descriptor.h,{width:innerWidth,height:innerHeight});
+    e.panel.style.left=rect.left+"px";
+    e.panel.style.top=rect.top+"px";
+    e.panel.style.width=rect.width+"px";
+    e.panel.style.height=rect.height+"px";
   }
-  private drag(e:Entry,dx:number,dy:number):void{
-    const {minY,maxX,maxY}=this.maxPos(e);
-    e.left=Math.max(0,Math.min(maxX,e.left+dx));
-    e.top=Math.max(minY,Math.min(maxY,e.top+dy));
-    e.panel.style.left=Math.round(e.left)+"px";
-    e.panel.style.top=Math.round(e.top)+"px";
-    e.descriptor.x=maxX?e.left/maxX:0;
-    e.descriptor.y=maxY>minY?(e.top-minY)/(maxY-minY):0;
-    // Intentionally no synchronous localStorage writes on pointermove.
+  private setRect(e:Entry,rect:FloatRect):void{
+    const coords=normalizedFloatRect(rect,{width:innerWidth,height:innerHeight});
+    e.descriptor={...e.descriptor,x:coords.x,y:coords.y,w:rect.width,h:rect.height};
+    // Do not write localStorage until pointerup or a keyboard resize step.
   }
   private resizeAll():void{
     for(const e of this.entries.values())this.position(e);
