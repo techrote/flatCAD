@@ -112,7 +112,7 @@ test("slot tool generates exact round-ended extrusion",async({page})=>{
   await page.keyboard.press("s");
   await expect(page.locator("#shape-options")).toBeVisible();
   await page.getByLabel("Radius",{exact:true}).fill("4");
-  await page.getByLabel("Radius").press("Tab");
+  await page.getByLabel("Radius",{exact:true}).press("Tab");
   await draw(page,[.40,.50],[.60,.50]);
   await page.keyboard.press("e");
   await page.keyboard.press("Enter");
