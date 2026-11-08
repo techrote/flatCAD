@@ -1743,6 +1743,16 @@ async function renderPixelComparison(page:import("@playwright/test").Page,
       throw Error("Mismatched screenshot dimensions");
     let all=0,model=0,back=0,allCount=0,modelCount=0,backCount=0;
     let significant=0;
+    let stableBackdrop=0,stableFace=0,stableBackdropCount=0,stableFaceCount=0;
+    // Identify flat, interior pixels from the DIRECT reference image,
+    // eroding by two pixels to exclude edge MSAA coverage differences.
+    const interior=(x:number,y:number,check:(r:number,g:number,b:number)=>boolean)=>{
+      for(const [dx,dy] of [[0,0],[-2,0],[2,0],[0,-2],[0,2],[-2,-2],[-2,2],[2,-2],[2,2]]){
+        const j=((y+dy)*one.width+x+dx)*4;
+        if(!check(one.data[j],one.data[j+1],one.data[j+2]))return false;
+      }
+      return true;
+    };
     for(let y=0;y<one.height;y+=2){
       for(let x=0;x<one.width;x+=2){
         const i=(y*one.width+x)*4;
@@ -1752,6 +1762,19 @@ async function renderPixelComparison(page:import("@playwright/test").Page,
         all+=diff;allCount++;
         if(b>70&&b>r+18&&b>g+12){model+=diff;modelCount++;if(diff>5)significant++;}
         if(r<40&&g<55&&b<85){back+=diff;backCount++;}
+        if(x>=4&&y>=4&&x+4<one.width&&y+4<one.height){
+          // Exact original dark background (RGB 11/18/32) is the contract.
+          // Sampling deep inside its uniform area excludes jagged edge pixels.
+          if(interior(x,y,(rr,gg,bb)=>Math.abs(rr-11)<=1&&
+            Math.abs(gg-18)<=1&&Math.abs(bb-32)<=1)){
+            stableBackdrop+=diff;stableBackdropCount++;
+          }
+          if(b>70&&b>r+18&&b>g+12&&
+            interior(x,y,(rr,gg,bb)=>
+              Math.abs(rr-r)<=2&&Math.abs(gg-g)<=2&&Math.abs(bb-b)<=2)){
+            stableFace+=diff;stableFaceCount++;
+          }
+        }
       }
     }
     const rgb=(d:Uint8ClampedArray,x:number,y:number)=>
@@ -1761,6 +1784,9 @@ async function renderPixelComparison(page:import("@playwright/test").Page,
       modelMeanAbs:model/Math.max(1,modelCount),
       modelChangedOver5Pct:100*significant/Math.max(1,modelCount),
       backgroundMeanAbs:back/Math.max(1,backCount),
+      flatBackdropMeanAbs:stableBackdrop/Math.max(1,stableBackdropCount),
+      flatFaceMeanAbs:stableFace/Math.max(1,stableFaceCount),
+      flatBackdropPixels:stableBackdropCount,flatFacePixels:stableFaceCount,
       backgroundDirect:rgb(one.data,4,4),
       backgroundCompared:rgb(two.data,4,4),
       modelPixels:modelCount,backgroundPixels:backCount,width:one.width,height:one.height
@@ -1819,10 +1845,16 @@ test("direct/offscreen colour parity and measurable AO on identical MSAA path",a
   expect(report.defaultVsOffscreen4.modelPixels).toBeGreaterThan(100);
   expect(report.defaultVsOffscreen4.backgroundPixels).toBeGreaterThan(100);
   expect(report.aoOffVsOn.modelPixels).toBeGreaterThan(100);
-  // A direct/composer mismatch is not an intrinsic MSAA quality difference.
-  // Compare broad surfaces/backdrop; antialiased model edges may legitimately vary.
-  expect(report.defaultVsOffscreen4.fullMeanAbs).toBeLessThan(2);
-  expect(report.defaultVsOffscreen4.backgroundMeanAbs).toBeLessThan(1.5);
+  // Enforce colour parity on stable, interior pixels and exact background
+  // RGBA, not full-image averages contaminated by normal MSAA edge changes.
+  const parity=report.defaultVsOffscreen4;
+  expect(parity.backgroundCompared).toEqual(parity.backgroundDirect);
+  expect(parity.backgroundDirect).toEqual([11,18,32,255]);
+  expect(parity.flatBackdropPixels).toBeGreaterThan(1000);
+  expect(parity.flatBackdropMeanAbs).toBeLessThan(1);
+  expect(parity.flatFacePixels).toBeGreaterThan(100);
+  expect(parity.flatFaceMeanAbs).toBeLessThan(2);
+  // Full-image/edge measurements are still recorded for comparisons.
   expect(report.directRestoration.fullMeanAbs).toBeLessThan(.2);
   expect(Number(report.depthRange[0])).toBeGreaterThan(0);
   expect(Number(report.depthRange[1])).toBeGreaterThan(Number(report.depthRange[0]));
@@ -1849,6 +1881,44 @@ test("new CAD line defaults are one black CSS pixel and a single checkbox",async
 });
 
 
+test("Render inspector exposes MSAA controls outside collapsed AO diagnostics in every layout",async({page})=>{
+  await page.setViewportSize({width:1440,height:820});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const inspector=page.locator("#render-dialog");
+  const inspect=async()=>{
+    await openMenu(page,"render","dialog.render");
+    await expect(inspector).toBeVisible();
+    await expect(inspector).toHaveAttribute("open","");
+    await expect(page.locator("#render-ao-diagnostics")).toHaveJSProperty("open",false);
+    await expect(page.locator("#render-ao")).toBeHidden();
+    for(const id of ["render-msaa","render-supersampling","render-pixel-budget",
+      "render-downsample","render-clean-preset"]){
+      await expect(page.locator("#"+id)).toBeVisible();
+    }
+  };
+  await inspect();
+  await page.locator("#render-msaa").selectOption("4");
+  await expect(page.locator("#preview")).toHaveAttribute("data-msaa-requested","4");
+  await page.locator('[data-close="render-dialog"]').last().click();
+  await openMenu(page,"view","view.float");
+  await inspect();
+  await page.locator("#render-msaa").selectOption("2");
+  await expect(page.locator("#preview")).toHaveAttribute("data-msaa-requested","2");
+  await page.locator('[data-close="render-dialog"]').last().click();
+  await openMenu(page,"view","view.dock");
+  await inspect();
+  await page.locator("#render-msaa").selectOption("browser");
+  await expect(page.locator("#preview")).toHaveAttribute("data-msaa-path","browser");
+  await page.locator('[data-close="render-dialog"]').last().click();
+  await openMenu(page,"view","view.float.new");
+  await openMenu(page,"view","view.solid.hide");
+  await inspect();
+  await page.locator("#render-pixel-budget").selectOption("16000000");
+  await expect(page.locator(".floating-render-canvas").first())
+    .toHaveAttribute("data-render-pixel-budget","16000000");
+  await page.locator('[data-close="render-dialog"]').last().click();
+});
 test("floating WebGL background remains transparent in direct and offscreen MSAA",async({page},testInfo)=>{
   await page.setViewportSize({width:1440,height:820});
   await page.goto("/");

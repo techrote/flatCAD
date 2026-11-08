@@ -169,12 +169,12 @@ root.innerHTML=[
   '  <div class="dialog-scroll"><fieldset class="render-group"><legend>Antialiasing</legend>',
   '    <details id="render-ao-diagnostics" class="render-advanced"><summary>Experimental AO diagnostics (not yet qualified)</summary>',
   '    <label class="check render-effect-option"><input id="render-ao" type="checkbox"> Enable SSAO test</label>',
+  '    <label class="render-knob"><span>AO sampling radius <output id="render-ao-radius-value">8</output></span><input id="render-ao-radius" type="range" min="0" max="24" step="1" value="8"></label>',
+  '    <small class="navigation-hint">Diagnostic only: AO has not shown measurable model occlusion in current automated screenshots. Off by default.</small></details>',
   '    <label class="field"><span>MSAA samples (independent of AO)</span><select id="render-msaa"><option value="browser">Browser default</option><option value="0">Off (0 samples)</option><option value="2">2 samples</option><option value="4">4 samples</option><option value="8">8 samples</option></select></label>',
   '    <label class="field"><span>Requested SSAA resolution</span><select id="render-supersampling"><option value="1">Native (1×)</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="1.75">1.75×</option><option value="2">2×</option><option value="2.5">2.5×</option><option value="3">3×</option><option value="4">4×</option><option value="8">8× (experimental)</option></select></label>',
   '    <label class="field"><span>Max framebuffer pixels per view</span><select id="render-pixel-budget"><option value="8000000">8M · safe default</option><option value="16000000">16M</option><option value="32000000">32M · experimental</option><option value="64000000">64M · experimental</option></select></label>',
   '    <label class="field"><span>Canvas downsampling</span><select id="render-downsample"><option value="browser">Browser smoothing (default)</option><option value="nearest">Nearest / pixelated (diagnostic)</option></select></label>',
-  '    <label class="render-knob"><span>AO sampling radius <output id="render-ao-radius-value">8</output></span><input id="render-ao-radius" type="range" min="0" max="24" step="1" value="8"></label>',
-  '    <small class="navigation-hint">Diagnostic only: AO has not shown measurable model occlusion in current automated screenshots. Off by default.</small></details>',
   '    <small id="render-resolution-info" class="navigation-hint" aria-live="polite">Resolution and MSAA limits shown here.</small>',
   '  </fieldset><fieldset class="render-group"><legend>CAD edges</legend>',
   '    <label class="check render-effect-option"><input id="render-lines-enabled" type="checkbox" checked> Lines</label>',
@@ -1406,8 +1406,10 @@ function showRenderSettings():void{
   closeMenu();
   syncRenderInspector();
   const panel=dialog("render-dialog");
-  // Nonmodal: controls can be adjusted while the CAD view remains undimmed.
+  // AO experiments are intentionally collapsed, but primary MSAA/SSAA controls
+  // must remain outside that disclosure in every layout mode.
   if(!panel.open)panel.show();
+  panel.dataset.layoutAtOpen=workspaceLayout.tileMode;
 }
 function showLayoutSettings():void{
   closeMenu();
