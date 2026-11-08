@@ -1,35 +1,53 @@
 import {describe,it,expect} from "vitest";
-import {validateRenderSettings,effectivePixelRatio,DEFAULT_RENDER_SETTINGS} from "./render-settings";
-describe("render effects and diagnostic preferences",()=>{
-  it("validates defaults and migrates existing v1 settings",()=>{
+import {validateRenderSettings,effectivePixelRatio,effectiveMsaaSamples,
+  CLEAN_CAD_RENDER_SETTINGS,DEFAULT_RENDER_SETTINGS} from "./render-settings";
+describe("render and AA diagnostics",()=>{
+  it("keeps legacy render.v1 preferences compatible",()=>{
     expect(validateRenderSettings(DEFAULT_RENDER_SETTINGS)).toEqual(DEFAULT_RENDER_SETTINGS);
-    const old={version:1,ambientOcclusion:true,supersampling:1.5};
-    expect(validateRenderSettings(old)).toEqual({
+    const legacy={version:1,ambientOcclusion:true,supersampling:1.5};
+    expect(validateRenderSettings(legacy)).toEqual({
       ...DEFAULT_RENDER_SETTINGS,ambientOcclusion:true,supersampling:1.5
     });
   });
-  it("accepts independent edge, light and AO diagnostics",()=>{
-    const updated={...DEFAULT_RENDER_SETTINGS,
-      supersampling:1.75,edgeMode:"screen",edgeWidthPx:2.5,
-      edgeOpacity:.4,edgeColor:"#f0aaff",ambientLight:.5,keyLight:4,aoRadius:20};
-    expect(validateRenderSettings(updated)).toEqual(updated);
-    expect(validateRenderSettings({...updated,edgeMode:"hidden"}).edgeMode).toBe("hidden");
+  it("validates 4×/8× SSAA, explicit MSAA and browser downsample modes",()=>{
+    const s={...DEFAULT_RENDER_SETTINGS,supersampling:8 as const,
+      renderPixelBudget:64_000_000 as const,msaaSamples:8 as const,
+      downsampleMode:"nearest" as const};
+    expect(validateRenderSettings(s)).toEqual(s);
+    expect(validateRenderSettings({...s,msaaSamples:0}).msaaSamples).toBe(0);
+    expect(validateRenderSettings({...s,msaaSamples:"browser"}).msaaSamples).toBe("browser");
   });
-  it("rejects invalid settings instead of silently rewriting them",()=>{
-    const invalid=[
-      {supersampling:8},{edgeMode:"bitmap"},{edgeWidthPx:0},
-      {edgeWidthPx:Infinity},{edgeOpacity:-.1},{edgeOpacity:1.1},
-      {edgeColor:"white"},{edgeColor:"#abcd"},{ambientLight:-1},
-      {ambientLight:NaN},{keyLight:6},{aoRadius:25}
-    ];
-    for(const patch of invalid)
+  it("supports exact owner-approved Clean CAD appearance without changing defaults",()=>{
+    expect(CLEAN_CAD_RENDER_SETTINGS).toMatchObject({
+      ambientOcclusion:false,supersampling:1,edgeMode:"screen",
+      edgeWidthPx:.5,edgeOpacity:.5,ambientLight:.75,keyLight:5
+    });
+    expect(DEFAULT_RENDER_SETTINGS.edgeMode).toBe("native");
+  });
+  it("rejects invalid values instead of silently coercing",()=>{
+    for(const patch of [{supersampling:6},{renderPixelBudget:128_000_000},
+      {msaaSamples:6},{msaaSamples:-1},{downsampleMode:"lanczos"},
+      {edgeMode:"bitmap"},{edgeWidthPx:0},{edgeOpacity:-.1},
+      {edgeColor:"white"},{ambientLight:NaN},{keyLight:6},{aoRadius:25}])
       expect(()=>validateRenderSettings({...DEFAULT_RENDER_SETTINGS,...patch})).toThrow();
   });
-  it("keeps current pixel-budget cap, including intermediate supersampling",()=>{
-    expect(effectivePixelRatio(DEFAULT_RENDER_SETTINGS,1,800,500)).toBe(1);
-    expect(effectivePixelRatio({...DEFAULT_RENDER_SETTINGS,supersampling:1.25},1,800,500)).toBe(1.25);
-    expect(effectivePixelRatio({...DEFAULT_RENDER_SETTINGS,supersampling:2},1,800,500)).toBe(2);
-    expect(effectivePixelRatio({...DEFAULT_RENDER_SETTINGS,supersampling:3},2,3840,2160))
-      .toBeLessThan(1.1);
+  it("lets 8× SSAA actually run at 800×600 when high budget is explicitly chosen",()=>{
+    const large={...DEFAULT_RENDER_SETTINGS,supersampling:8 as const,
+      renderPixelBudget:32_000_000 as const};
+    expect(effectivePixelRatio(large,1,800,600)).toBe(8);
+    expect(effectivePixelRatio(large,1,1800,1200)).toBeLessThan(4);
+    expect(effectivePixelRatio({...large,renderPixelBudget:8_000_000},1,800,600))
+      .toBeLessThan(5);
+    expect(effectivePixelRatio({...large,renderPixelBudget:64_000_000},1,1200,800))
+      .toBeGreaterThan(7);
+  });
+  it("bounds MSAA to GPU capability and a real sample-pixel ceiling",()=>{
+    expect(effectiveMsaaSamples("browser",8,1000)).toBeNull();
+    expect(effectiveMsaaSamples(8,8,1_000_000)).toBe(8);
+    expect(effectiveMsaaSamples(8,4,1_000_000)).toBe(4);
+    expect(effectiveMsaaSamples(8,8,12_000_000)).toBe(4);
+    expect(effectiveMsaaSamples(8,8,32_000_000)).toBe(2);
+    expect(effectiveMsaaSamples(8,8,40_000_000)).toBe(0);
+    expect(effectiveMsaaSamples(0,8,1_000_000)).toBe(0);
   });
 });

@@ -104,3 +104,36 @@ The permanent bottom status bar and Sketch bottom strip are removed: **Undo/Redo
 ## Experimental Render inspector
 
 Render → Effects and antialiasing opens a **nonmodal** diagnostic panel so the model stays undimmed for live A/B comparisons. Compare original **native 1-backing-pixel** edges, optional **fixed CSS-pixel width** edges (0.5–5px) and **hidden** edges, with colour/opacity controls. Tune existing ambient/key lighting and the SSAO sample radius separately. Supersampling offers intermediate steps and reports the actual display backing resolution and effective pixel ratio. Even at "Native", flatCAD requests native MSAA. The browser currently chooses the downsampling filter; there is no custom filter dial. All controls are display-only preferences and leave CAD geometry and STEP unchanged. See [Render diagnostics ADR](docs/ADR-0010-RENDER-DIAGNOSTICS.md).
+
+
+## Experimental MSAA / high-resolution SSAA diagnostics
+
+In the nonmodal **Render inspector**, select MSAA independently of ambient occlusion:
+**Browser default**, **Off (0)**, **2**, **4** or **8** samples. Browser default
+uses the existing antialiased canvas only when no postprocessing is active.
+An AO pass renders offscreen, so select explicit MSAA to combine AO with
+multisampling. Explicit sample counts use a Three.js multisampled render target;
+the UI reports the requested, hardware-capped and sample-memory-budgeted count.
+
+Requested SSAA now includes **4×** and **8×**, with selectable per-view pixel
+budgets of **8M (default), 16M, 32M or 64M (experimental)**. 8× means eight
+times the linear render dimensions (up to **64×** as many pixels as native),
+not eight samples. The UI displays the *effective* resolution after budget,
+hardware texture and dimension limits, so choosing 8× does not falsely imply
+8× was achieved on a large viewport. The existing demand-driven renderer
+remains unchanged; these settings affect memory and latency when frames render.
+A further 64-million sample-pixel ceiling may reduce MSAA at high SSAA.
+
+**Canvas downsampling** offers Browser smoothing (original appearance) and
+Nearest/pixelated (useful as a diagnostic, not a quality filter). The browser's
+smooth downsampling kernel cannot be parametrically controlled through this
+pipeline. Lanczos, tent, box or sharpening would require an actual explicit
+GPU filtering pass with colour-space and performance qualification, not a
+cosmetic UI dropdown.
+
+The **Clean CAD preset** reproduces the owner's preferred experimental look:
+AO off, native SSAA, screen-space edges 0.5 CSS px at 50% opacity, ambient
+light 0.75 and key directional light 5. It is a selectable preference, not
+a change to the physically accepted historical defaults. Neither settings
+nor presets are part of the CAD document or change STEP output.
+See [ADR-0011](docs/ADR-0011-AA-CONTROLS.md).
