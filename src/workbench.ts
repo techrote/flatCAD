@@ -164,10 +164,22 @@ root.innerHTML=[
   '  <label class="layout-tile-visibility"><input id="tiled-solid-visible" type="checkbox" checked> Show tiled Solid viewport</label>',
   '  <label class="layout-float-opacity"><span>Floating-window background opacity <output id="float-opacity-value">0%</output></span><input id="float-opacity" type="range" min="0" max="100" step="5" value="0" aria-label="Floating-window background opacity"></label></div>',
   '  <footer><button id="tile-reset" class="button">Reset workspace</button><button data-close="layout-dialog" class="button primary">Done</button></footer></dialog>',
-  '<dialog id="render-dialog" class="settings-dialog"><div class="dialog-head"><div><strong>Render</strong><small>Presentation only · exact CAD geometry unchanged</small></div><button data-close="render-dialog">×</button></div>',
-  '  <div class="dialog-scroll"><label class="check render-effect-option"><input id="render-ao" type="checkbox"> Ambient occlusion (SSAO)</label>',
-  '  <label class="field"><span>Resolution supersampling</span><select id="render-supersampling"><option value="1">Off · native</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label>',
-  '  <small class="navigation-hint">Higher settings use more GPU memory; effective resolution is capped on large displays.</small></div>',
+  '<dialog id="render-dialog" class="settings-dialog render-inspector"><div class="dialog-head"><div><strong>Render inspector</strong><small>Live display tuning · native CAD remains unchanged</small></div><button data-close="render-dialog" aria-label="Close render inspector">×</button></div>',
+  '  <div class="dialog-scroll"><fieldset class="render-group"><legend>Antialiasing & occlusion</legend>',
+  '    <label class="check render-effect-option"><input id="render-ao" type="checkbox"> Ambient occlusion (SSAO)</label>',
+  '    <label class="field"><span>Requested render resolution</span><select id="render-supersampling"><option value="1">Native (MSAA requested)</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="1.75">1.75×</option><option value="2">2×</option><option value="2.5">2.5×</option><option value="3">3× (budget capped)</option></select></label>',
+  '    <label class="render-knob"><span>AO sampling radius <output id="render-ao-radius-value">8</output></span><input id="render-ao-radius" type="range" min="0" max="24" step="1" value="8"></label>',
+  '    <small id="render-resolution-info" class="navigation-hint" aria-live="polite">Browser downsampling is fixed.</small>',
+  '  </fieldset><fieldset class="render-group"><legend>CAD edges</legend>',
+  '    <label class="field"><span>Presentation</span><select id="render-edge-mode"><option value="native">Native 1 rendering pixel</option><option value="screen">Fixed screen-space width</option><option value="hidden">No edge lines</option></select></label>',
+  '    <label class="render-knob"><span>Screen-space line width <output id="render-edge-width-value">1.5 px</output></span><input id="render-edge-width" type="range" min="0.5" max="5" step="0.25" value="1.5"></label>',
+  '    <label class="render-knob"><span>Edge opacity <output id="render-edge-opacity-value">100%</output></span><input id="render-edge-opacity" type="range" min="0" max="1" step="0.05" value="1"></label>',
+  '    <label class="render-colour">Edge colour <input id="render-edge-color" type="color" value="#152a45"></label>',
+  '  </fieldset><fieldset class="render-group"><legend>Lighting</legend>',
+  '    <label class="render-knob"><span>Ambient light <output id="render-light-ambient-value">2.0</output></span><input id="render-light-ambient" type="range" min="0" max="4" step="0.25" value="2"></label>',
+  '    <label class="render-knob"><span>Directional key <output id="render-light-key-value">3.0</output></span><input id="render-light-key" type="range" min="0" max="5" step="0.25" value="3"></label>',
+  '    <small class="navigation-hint">Existing fill light remains at 1.0. All settings are UI preferences.</small>',
+  '  </fieldset></div>',
   '  <footer><button id="render-reset" class="button">Reset render</button><button data-close="render-dialog" class="button primary">Done</button></footer></dialog>'
 ].join("\n");
 
@@ -1323,21 +1335,55 @@ function commitTextSettings():void{
     persistPreferences();
   }catch(error){status("Sketch font settings invalid: "+String(error),true);}
 }
+function renderResolutionInfo():void{
+  const main=byId("preview");
+  const host=main.clientWidth>1&&main.clientHeight>1?main:
+    document.querySelector<HTMLElement>(".floating-render-canvas")??main;
+  const canvas=host.querySelector<HTMLCanvasElement>("canvas");
+  const ratio=Number(host.dataset.pixelRatio)||1;
+  const size=canvas&&host.clientWidth>1
+    ?host.clientWidth+"×"+host.clientHeight+" CSS px → "+
+      canvas.width+"×"+canvas.height+" backing px":"No active Solid viewport";
+  byId("render-resolution-info").textContent=
+    size+" · effective "+ratio.toFixed(2)+"× · browser compositor downsampling "+
+    "(no filter parameters in this rendering path) · max 8M pixels/view";
+}
+function syncRenderInspector():void{
+  const s=renderSettings;
+  input("render-ao").checked=s.ambientOcclusion;
+  select("render-supersampling").value=String(s.supersampling);
+  select("render-edge-mode").value=s.edgeMode;
+  input("render-edge-width").value=String(s.edgeWidthPx);
+  input("render-edge-opacity").value=String(s.edgeOpacity);
+  input("render-edge-color").value=s.edgeColor;
+  input("render-light-ambient").value=String(s.ambientLight);
+  input("render-light-key").value=String(s.keyLight);
+  input("render-ao-radius").value=String(s.aoRadius);
+  input("render-edge-width").disabled=s.edgeMode!=="screen";
+  input("render-edge-opacity").disabled=s.edgeMode==="hidden";
+  input("render-ao-radius").disabled=!s.ambientOcclusion;
+  byId("render-edge-width-value").textContent=s.edgeWidthPx.toFixed(2)+" px";
+  byId("render-edge-opacity-value").textContent=Math.round(s.edgeOpacity*100)+"%";
+  byId("render-light-ambient-value").textContent=s.ambientLight.toFixed(2);
+  byId("render-light-key-value").textContent=s.keyLight.toFixed(2);
+  byId("render-ao-radius-value").textContent=String(s.aoRadius);
+  renderResolutionInfo();
+}
 function applyRenderSettings(next:RenderSettings):void{
   try{
     renderSettings=validateRenderSettings(next);
     saveRenderSettings(renderSettings);
     preview?.setRenderSettings(renderSettings);
     floatingViews?.setRenderSettings(renderSettings);
-    input("render-ao").checked=renderSettings.ambientOcclusion;
-    select("render-supersampling").value=String(renderSettings.supersampling);
+    syncRenderInspector();
   }catch(error){status("Render settings invalid: "+String(error),true);}
 }
 function showRenderSettings():void{
   closeMenu();
-  input("render-ao").checked=renderSettings.ambientOcclusion;
-  select("render-supersampling").value=String(renderSettings.supersampling);
-  dialog("render-dialog").showModal();
+  syncRenderInspector();
+  const panel=dialog("render-dialog");
+  // Nonmodal: controls can be adjusted while the CAD view remains undimmed.
+  if(!panel.open)panel.show();
 }
 function showLayoutSettings():void{
   closeMenu();
@@ -1503,6 +1549,19 @@ select("render-supersampling").onchange=()=>applyRenderSettings({
   ...renderSettings,supersampling:
     (Number(select("render-supersampling").value) as RenderSettings["supersampling"])
 });
+select("render-edge-mode").onchange=()=>applyRenderSettings({
+  ...renderSettings,edgeMode:select("render-edge-mode").value as RenderSettings["edgeMode"]
+});
+for(const [id,field] of [
+  ["render-edge-width","edgeWidthPx"],["render-edge-opacity","edgeOpacity"],
+  ["render-light-ambient","ambientLight"],["render-light-key","keyLight"],
+  ["render-ao-radius","aoRadius"]
+] as const){
+  input(id).oninput=()=>applyRenderSettings({...renderSettings,[field]:Number(input(id).value)});
+}
+input("render-edge-color").oninput=()=>applyRenderSettings({
+  ...renderSettings,edgeColor:input("render-edge-color").value
+});
 button("render-reset").onclick=()=>applyRenderSettings({...DEFAULT_RENDER_SETTINGS});
 button("tile-reset").onclick=()=>{
   workspaceLayout.resetArrangement();select("tile-mode").value=workspaceLayout.tileMode;
@@ -1644,6 +1703,7 @@ window.addEventListener("storage",event=>{
     renderSettings=loadRenderSettings();
     preview?.setRenderSettings(renderSettings);
     floatingViews?.setRenderSettings(renderSettings);
+    if(dialog("render-dialog").open)syncRenderInspector();
   }
   if(event.key===PREFS_KEY){
     prefs=loadPreferences();canvas.setPreferences(prefs);

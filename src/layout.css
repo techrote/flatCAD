@@ -514,3 +514,35 @@
 .workbench-layout.float-solid .preview-panel .float-window-handle,
 .workbench-layout.float-solid .preview-panel .float-corner-grip{display:flex}
 .workbench-layout.float-solid .preview-panel{min-width:220px;min-height:180px}
+
+
+/* Live render inspector: nonmodal, no screen-wide dimming during A/B tuning.
+ * Render controls remain display-only and do not intercept the CAD behind. */
+#render-dialog.render-inspector[open]{
+  position:fixed;top:110px;right:18px;left:auto;margin:0;
+  width:min(390px,calc(100vw - 24px));max-height:calc(100vh - 126px);
+  z-index:160;box-shadow:0 10px 35px #0009;
+}
+#render-dialog.render-inspector::backdrop{background:transparent}
+#render-dialog .dialog-head{padding:10px 13px}
+#render-dialog .dialog-head strong{font-size:14px}
+#render-dialog .dialog-scroll{padding:8px 13px;max-height:calc(100vh - 235px)}
+#render-dialog footer{padding:8px 13px}
+.render-group{border:1px solid #355774;border-radius:7px;margin:7px 0;padding:9px;
+  display:grid;gap:9px;min-width:0}
+.render-group legend{font-size:12px;color:#c6e1fa;font-weight:600;padding:0 5px}
+.render-group .render-effect-option{margin:0}
+.render-group .field{margin:0}
+.render-knob{display:flex;flex-direction:column;gap:5px;font-size:11px;color:#c3dced}
+.render-knob span{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.render-knob input{width:100%;accent-color:#67abef}
+.render-knob input:disabled{opacity:.3}
+.render-knob output{font:11px ui-monospace,Consolas,monospace}
+.render-colour{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:11px}
+.render-colour input{width:64px;height:27px;padding:1px;border:1px solid #406587;background:#0e2336}
+#render-resolution-info{line-height:1.45;overflow-wrap:anywhere}
+@media(max-width:720px){
+  #render-dialog.render-inspector[open]{top:55px;right:6px;
+    width:min(370px,calc(100vw - 12px));max-height:calc(100vh - 70px)}
+  #render-dialog .dialog-scroll{max-height:calc(100vh - 170px)}
+}
