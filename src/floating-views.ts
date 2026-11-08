@@ -50,6 +50,8 @@ export class FloatRenderManager{
   private foreground=0;
   private activeId:string|null=null;
   private currentMesh:GeometryMesh|null=null;
+  // Preserve committed face targets when a view is created during an uncommitted preview.
+  private currentCommittedPickMesh:GeometryMesh|null=null;
   private currentOptions:NonNullable<Parameters<Preview["setMesh"]>[1]>={};
   private currentElevations:number[]=[];
   private currentInspection=false;
@@ -103,12 +105,14 @@ export class FloatRenderManager{
   removeAll():void{for(const id of this.ids())this.remove(id);}
   setMesh(mesh:GeometryMesh|null,options:Parameters<Preview["setMesh"]>[1]={}):void{
     this.currentMesh=mesh;
+    if(!options?.pending)this.currentCommittedPickMesh=mesh;
     this.currentOptions=options??{};
     for(const e of this.entries.values()){
       e.preview.setMesh(mesh,options);
     }
   }
   setCommittedPickMesh(mesh:GeometryMesh|null):void{
+    this.currentCommittedPickMesh=mesh;
     for(const e of this.entries.values())e.preview.setCommittedPickMesh(mesh);
   }
   setFaceElevations(values:readonly number[]):void{
@@ -170,6 +174,8 @@ export class FloatRenderManager{
       preview.setMesh(this.currentMesh,{...this.currentOptions,preserveCamera:false});
       preview.fitView();
     }
+    // setMesh(pending) intentionally leaves the committed pick target unset.
+    if(this.currentCommittedPickMesh)preview.setCommittedPickMesh(this.currentCommittedPickMesh);
     preview.setHistoryInspection(this.currentInspection);
     if(save)this.persist();
   }

@@ -13,7 +13,8 @@ export default defineConfig({
   use: {
     baseURL: "http://127.0.0.1:4173",
     browserName,
-    headless: true,
+    // Linux Firefox's software WebGL path is qualified in headed Xvfb mode.
+    headless: process.env.FLATCAD_E2E_HEADED !== "1",
     launchOptions: browserName==="chromium"
       ? { args: ["--enable-unsafe-swiftshader", "--use-angle=swiftshader"] }
       : { firefoxUserPrefs: {

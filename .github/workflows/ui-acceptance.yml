@@ -57,9 +57,20 @@ jobs:
       - name: Build exact-source production bundle
         run: npm run build
       - name: Exercise real rendering, camera interaction and layout persistence
+        shell: bash
         env:
           FLATCAD_E2E_BROWSER: ${{ matrix.browser }}
-        run: npm run test:e2e -- --grep "floating|Float|viewport|history Cut|View/Layout/Render|idle Solid|three-column layout|resizing both dividers|frame pacing"
+          FLATCAD_E2E_HEADED: ${{ runner.os == 'Linux' && '1' || '0' }}
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          MOZ_X11_EGL: '0'
+        run: |
+          # Headless Firefox on GPU-less Linux may reject all WebGL contexts.
+          # Exercise real rendering under Xvfb/Mesa; keep all assertions enabled.
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            xvfb-run -a npm run test:e2e -- --grep "floating|Float|viewport|history Cut|View/Layout/Render|idle Solid|three-column layout|resizing both dividers|frame pacing"
+          else
+            npm run test:e2e -- --grep "floating|Float|viewport|history Cut|View/Layout/Render|idle Solid|three-column layout|resizing both dividers|frame pacing"
+          fi
       - name: Upload screenshots and browser traces
         if: always()
         uses: actions/upload-artifact@v4

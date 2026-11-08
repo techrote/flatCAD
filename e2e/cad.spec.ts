@@ -1453,3 +1453,41 @@ test("independent floating views share render settings but not exact CAD geometr
   expect(await page.locator("#status").getAttribute("data-volume-mm3")).toBe(originalVolume);
   await expect(page.locator(".preview-panel .preview-root")).toHaveAttribute("data-supersample","1.5");
 });
+
+
+test("floating WebGL2 capability preflight reports actual driver availability",async({page})=>{
+  await page.goto("/");
+  const diagnostic=await page.evaluate(()=>{
+    const canvas=document.createElement("canvas");
+    let reason="";
+    canvas.addEventListener("webglcontextcreationerror",e=>{reason=(e as WebGLContextEvent).statusMessage;});
+    const gl=canvas.getContext("webgl2");
+    const result={available:gl!==null,
+      vendor:gl?.getParameter(gl.VENDOR)??null,
+      renderer:gl?.getParameter(gl.RENDERER)??null,
+      reason,userAgent:navigator.userAgent};
+    gl?.getExtension("WEBGL_lose_context")?.loseContext();
+    return result;
+  });
+  console.log("flatCAD WebGL2 preflight:",JSON.stringify(diagnostic));
+  expect(diagnostic.available,JSON.stringify(diagnostic)).toBe(true);
+});
+
+test("floating view opened during provisional cut retains committed face pick",async({page})=>{
+  await page.setViewportSize({width:1440,height:820});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await page.locator("#profiles-details summary").click();
+  await page.locator("#profile-list .profile-item").nth(1).click();
+  await page.keyboard.press("e");
+  await expect(page.locator("#extrude-flyout")).toBeVisible();
+  await expect(page.locator("#preview")).toHaveAttribute("data-preview-state","ready");
+  await openMenu(page,"view","view.float.new");
+  const host=page.locator("#floating-views-layer .floating-render-canvas").first();
+  await expect(host).toHaveAttribute("data-rendered-solid","true");
+  await page.locator("#extrude-z").fill("0");
+  await page.locator("#extrude-z").focus();
+  const r=(await host.boundingBox())!;
+  await page.mouse.click(r.x+r.width/2,r.y+r.height/2);
+  await expect(page.locator("#extrude-z")).toHaveValue("8");
+});
