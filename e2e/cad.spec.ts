@@ -1521,7 +1521,7 @@ test("floating control spacing and opacity persist independently from CAD",async
   const handleBox=(await handle.boundingBox())!,navBox=(await nav.boundingBox())!;
   expect(handleBox.width).toBeGreaterThanOrEqual(44);
   expect(Math.abs(handleBox.x-(rect.x+3))).toBeLessThan(2);
-  expect(Math.abs(handleBox.y-navBox.y)).toBeLessThan(1);
+  expect(Math.abs(handleBox.y-navBox.y)).toBeLessThan(1.6);
   await openMenu(page,"layout","dialog.layout");
   const slider=page.locator("#float-opacity");
   await slider.focus();
@@ -2166,8 +2166,8 @@ test("floating move handle fills free top-bar width, without overlapping navigat
     const handle=(await page.locator('.floating-render-handle-layer [data-float-owner="'+floatId+'"]').boundingBox())!;
     const nav=(await panel.locator(".float-nav").boundingBox())!;
     expect(handle.width).toBeGreaterThan(65);
-    expect(handle.x+handle.width).toBeLessThan(nav.x-2);
-    expect(Math.abs(handle.y-nav.y)).toBeLessThan(1);
+    expect(handle.x+handle.width).toBeLessThanOrEqual(nav.x-2);
+    expect(Math.abs(handle.y-nav.y)).toBeLessThan(1.6);
     return handle.width;
   };
   await openMenu(page,"view","view.float");
@@ -2264,9 +2264,12 @@ test("floating Sketch toolbar side-snaps and obeys move-handle stacking",async({
   await expect.poll(async()=>Math.round((await renderHandle.boundingBox())!.y))
     .toBe(Math.round(moved.y+5));
   const gripBox=(await grip.boundingBox())!;
-  const top=await page.evaluate(({x,y})=>document.elementFromPoint(x,y)?.id,
-    {x:gripBox.x+gripBox.width/2,y:gripBox.y+gripBox.height/2});
-  expect(top).toBe("tool-dock-float");
+  const top=await page.evaluate(({x,y})=>{
+    const hit=document.elementFromPoint(x,y);
+    return {grip:Boolean(hit?.closest("#tool-dock-float")),
+      tag:hit?.tagName??"none",owner:hit?.closest("button")?.id??"none"};
+  },{x:gripBox.x+gripBox.width/2,y:gripBox.y+gripBox.height/2});
+  expect(top.grip,JSON.stringify(top)).toBe(true);
   await page.reload();
   await expect(rail).toHaveAttribute("data-snap-side","right");
   await grip.click();

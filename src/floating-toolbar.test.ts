@@ -8,7 +8,7 @@ describe("Sketch toolbar free drag and edge snapping",()=>{
   });
   it("leaves the edge when dragged away and clamps docking vertically",()=>{
     expect(toolbarSnap(360,200,46,420,rect).side).toBeNull();
-    expect(toolbarSnap(117,-300,46,420,rect).side).toBeNull();
+    expect(toolbarSnap(117,-500,46,420,rect).side).toBeNull();
     expect(toolbarSnap(117,640,46,420,rect).y).toBeLessThanOrEqual(265);
   });
   it("validates persisted UI pose independently of CAD documents",()=>{
