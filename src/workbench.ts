@@ -1703,15 +1703,22 @@ input("settings-input").onchange=async event=>{
   }
   el.value="";
 };
-document.querySelectorAll<HTMLButtonElement>("[data-close]").forEach(el=>{
-  el.onclick=()=>dialog(el.dataset.close!).close();
-});
-// Escape from the editor and closing without assigning must never leave the
-// global key handler stuck in shortcut-recording mode.
-dialog("shortcuts-dialog").addEventListener("close",()=>{
+function stopShortcutRecording():void{
   shortcutRecording=null;
   byId("shortcut-error").textContent="";
+}
+document.querySelectorAll<HTMLButtonElement>("[data-close]").forEach(el=>{
+  el.onclick=()=>{
+    const target=el.dataset.close!;
+    // HTMLDialogElement.close() dispatches its 'close' event asynchronously.
+    // Clear recording *before* closing so the immediately following CAD
+    // key cannot be captured by a cancelled Keybinds reassignment.
+    if(target==="shortcuts-dialog")stopShortcutRecording();
+    dialog(target).close();
+  };
 });
+dialog("shortcuts-dialog").addEventListener("cancel",stopShortcutRecording);
+dialog("shortcuts-dialog").addEventListener("close",stopShortcutRecording);
 button("shortcut-reset").onclick=()=>{
   prefs=validatePreferences({...prefs,shortcuts:{...defaultPreferences().shortcuts}});
   persistPreferences();shortcutRecording=null;renderShortcuts();
