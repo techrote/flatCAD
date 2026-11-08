@@ -38,8 +38,10 @@ describe("render and AA diagnostics",()=>{
     expect(effectivePixelRatio(large,1,1800,1200)).toBeLessThan(4);
     expect(effectivePixelRatio({...large,renderPixelBudget:8_000_000},1,800,600))
       .toBeLessThan(5);
-    expect(effectivePixelRatio({...large,renderPixelBudget:64_000_000},1,1200,800))
-      .toBeGreaterThan(7);
+    // At 1200×800 the explicit 8192px dimension guard limits 8× to 6.83×.
+    const constrained=effectivePixelRatio({...large,renderPixelBudget:64_000_000},1,1200,800);
+    expect(constrained).toBeGreaterThan(6.8);
+    expect(constrained).toBeLessThan(8);
   });
   it("bounds MSAA to GPU capability and a real sample-pixel ceiling",()=>{
     expect(effectiveMsaaSamples("browser",8,1000)).toBeNull();
