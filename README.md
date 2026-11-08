@@ -137,3 +137,23 @@ light 0.75 and key directional light 5. It is a selectable preference, not
 a change to the physically accepted historical defaults. Neither settings
 nor presets are part of the CAD document or change STEP output.
 See [ADR-0011](docs/ADR-0011-AA-CONTROLS.md).
+
+
+## CAD lines and AO depth repair (experimental)
+
+The Render inspector's CAD edges section now defaults to **Lines on, 1 CSS px,
+pure black, 100% opacity**, drawn using the same screen-space line material at
+every resolution. There is no separate native/screen/hidden presentation mode
+dropdown: uncheck **Lines** to hide presentation edges, or adjust the one
+width slider directly. The optional historical **Clean CAD** preset still
+restores its separate 0.5px/50% visual experiment. Existing v1 preferences
+migrate from their old edge modes without discarding user-set widths/colours.
+
+The default **SSAO remains off**. Three.js's SSAO shader operates on normalized
+depth values; the old raw `minDistance=.005` excluded any occlusion closer
+than about 500mm for the current orthographic camera. The experimental AO
+path now derives its depth thresholds in millimetres from the camera range,
+making smaller fillets/recesses eligible for actual occlusion. The
+offscreen colour and transparency match to browser-default rendering is
+tracked separately with screenshot-based A/B tests (no CAD document changes).
+See [ADR-0012](docs/ADR-0012-RENDER-PARITY-AO-LINES.md).
