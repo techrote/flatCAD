@@ -1867,15 +1867,29 @@ test("floating WebGL background remains transparent in direct and offscreen MSAA
   await canvas.evaluate(el=>(el as HTMLElement).style.visibility="visible");
   await page.waitForTimeout(70);
   const direct=await page.screenshot({clip,path:testInfo.outputPath("float-direct-transparent.png")});
+  // Change MSAA with the Solid docked, then restore exactly the same
+  // transparent floating layout. The float-mode Render-inspector accessibility
+  // issue is tracked independently; do not mix that with alpha acceptance.
+  await openMenu(page,"view","view.dock");
   await openMenu(page,"render","dialog.render");
+  await expect(page.locator("#render-dialog")).toBeVisible();
   await page.locator("#render-msaa").selectOption("4");
+  await page.locator('[data-close="render-dialog"]').last().click();
+  await openMenu(page,"view","view.float");
   await expect(page.locator("#preview")).toHaveAttribute("data-msaa-path","offscreen");
-  await page.locator("#render-dialog").evaluate(el=>(el as HTMLElement).style.visibility="hidden");
+  const floated=(await canvas.boundingBox())!;
+  const clipOffscreen={x:Math.round(floated.x+floated.width/2-20),
+    y:Math.round(floated.y+floated.height/2-20),width:40,height:40};
+  await canvas.evaluate(el=>(el as HTMLElement).style.visibility="hidden");
+  const underlyingOffscreen=await page.screenshot({
+    clip:clipOffscreen,path:testInfo.outputPath("float-offscreen-underlay.png")});
+  await canvas.evaluate(el=>(el as HTMLElement).style.visibility="visible");
   await page.waitForTimeout(70);
-  const offscreen=await page.screenshot({clip,path:testInfo.outputPath("float-offscreen-transparent.png")});
+  const offscreen=await page.screenshot({
+    clip:clipOffscreen,path:testInfo.outputPath("float-offscreen-transparent.png")});
   const result={
     direct:await renderPixelComparison(page,underlying,direct),
-    offscreen:await renderPixelComparison(page,underlying,offscreen)
+    offscreen:await renderPixelComparison(page,underlyingOffscreen,offscreen)
   };
   console.log("FLATCAD_FLOAT_ALPHA_EVIDENCE "+JSON.stringify(result));
   expect(result.direct.fullMeanAbs).toBeLessThan(3);
