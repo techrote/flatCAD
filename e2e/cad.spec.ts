@@ -1105,9 +1105,10 @@ test("floating Solid blocks sketch input and uses handle move and corner resize"
   await expect(solid).toHaveAttribute("data-float-hit-policy","viewport");
   await expect(canvas).toHaveCSS("pointer-events","auto");
   const start=(await panel.boundingBox())!;
-  // Transparent backgrounds may serialize with any RGB channels; only alpha is contractual.
+  // Fresh floating frames now have a subtle 20% background by default.
+  // Explicitly saved zero remains completely transparent (covered separately).
   expect(await panel.evaluate(el=>getComputedStyle(el).backgroundColor))
-    .toMatch(/,\s*0\)$/);
+    .toBe("rgba(11, 18, 32, 0.2)");
   const empty=[start.x+start.width*.12,start.y+start.height*.78];
   const hit=await page.evaluate(([x,y])=>document.elementFromPoint(x,y)?.tagName,empty);
   expect(hit).toBe("CANVAS");
