@@ -1100,8 +1100,9 @@ test("floating Solid blocks sketch input and uses handle move and corner resize"
   await expect(solid).toHaveAttribute("data-float-hit-policy","viewport");
   await expect(canvas).toHaveCSS("pointer-events","auto");
   const start=(await panel.boundingBox())!;
+  // Transparent backgrounds may serialize with any RGB channels; only alpha is contractual.
   expect(await panel.evaluate(el=>getComputedStyle(el).backgroundColor))
-    .toBe("rgba(0, 0, 0, 0)");
+    .toMatch(/,\s*0\)$/);
   const empty=[start.x+start.width*.12,start.y+start.height*.78];
   const hit=await page.evaluate(([x,y])=>document.elementFromPoint(x,y)?.tagName,empty);
   expect(hit).toBe("CANVAS");
