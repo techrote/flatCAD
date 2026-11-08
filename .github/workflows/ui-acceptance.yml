@@ -67,9 +67,9 @@ jobs:
           # Headless Firefox on GPU-less Linux may reject all WebGL contexts.
           # Exercise real rendering under Xvfb/Mesa; keep all assertions enabled.
           if [[ "$RUNNER_OS" == "Linux" ]]; then
-            xvfb-run -a npm run test:e2e -- --grep "floating|Float|viewport|history Cut|View/Layout/Render|idle Solid|three-column layout|resizing both dividers|frame pacing"
+            xvfb-run -a npm run test:e2e -- --grep "floating|Float|viewport|history Cut|View/Layout/Render|idle Solid|three-column layout|resizing both dividers|frame pacing|direct/offscreen colour parity|floating WebGL background|new CAD line defaults"
           else
-            npm run test:e2e -- --grep "floating|Float|viewport|history Cut|View/Layout/Render|idle Solid|three-column layout|resizing both dividers|frame pacing"
+            npm run test:e2e -- --grep "floating|Float|viewport|history Cut|View/Layout/Render|idle Solid|three-column layout|resizing both dividers|frame pacing|direct/offscreen colour parity|floating WebGL background|new CAD line defaults"
           fi
       - name: Upload screenshots and browser traces
         if: always()
