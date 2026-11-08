@@ -53,6 +53,7 @@ export class Preview {
   private disposed=false;
   private renderCount=0;
   private composer:EffectComposer|null=null;
+  private scenePass:RenderPass|null=null;
   private ssaoPass:SSAOPass|null=null;
   private pipelineKey="direct";
   private appliedPixelRatio=0;
@@ -192,6 +193,7 @@ export class Preview {
     this.referenceGrid.visible=!enabled;
     this.axesHelper.visible=!enabled;
     this.renderer.setClearColor(0x0b1220,enabled?0:1);
+    if(this.scenePass)this.scenePass.clearAlpha=enabled?0:1;
     this.renderer.domElement.style.pointerEvents="auto";
     if(enabled)this.container.dataset.floatHitPolicy="viewport";
     else delete this.container.dataset.floatHitPolicy;
@@ -659,6 +661,7 @@ export class Preview {
     this.ssaoPass?.dispose();
     this.composer?.dispose();
     this.ssaoPass=null;
+    this.scenePass=null;
     this.composer=null;
   }
   private createComposer(samples:number,aoEnabled:boolean,ratio:number,width:number,height:number):void{
@@ -666,7 +669,16 @@ export class Preview {
       type:THREE.HalfFloatType,depthBuffer:true,samples
     });
     const composer=new EffectComposer(this.renderer,target);
-    composer.addPass(new RenderPass(this.scene,this.camera));
+    // Direct WebGL canvas clearing and offscreen OutputPass do not apply
+    // exactly the same transfer function to the clear colour. The original
+    // direct #0b1220 must remain authoritative; prelinearize only the
+    // composer clear so OutputPass displays the matching background.
+    // All lit mesh surfaces retain their original shader colour pipeline.
+    const parityClear=new THREE.Color(0x0b1220).convertSRGBToLinear();
+    const scenePass=new RenderPass(this.scene,this.camera,null,
+      parityClear,this.floating?0:1);
+    this.scenePass=scenePass;
+    composer.addPass(scenePass);
     if(aoEnabled){
       const ao=new SSAOPass(this.scene,this.camera,Math.max(1,width),Math.max(1,height),8);
       ao.kernelRadius=this.renderSettings.aoRadius;
