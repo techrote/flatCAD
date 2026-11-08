@@ -6,6 +6,11 @@ async function openMenu(page:import("@playwright/test").Page,name:string,action:
   await page.locator('[data-menu="'+name+'"]').click();
   await page.locator('[data-command="'+action+'"]').click();
 }
+async function openAoDiagnostics(page:import("@playwright/test").Page){
+  const details=page.locator("#render-ao-diagnostics");
+  if(!(await details.evaluate(el=>(el as HTMLDetailsElement).open)))
+    await details.locator("summary").click();
+}
 async function newProject(page:import("@playwright/test").Page){
   await openMenu(page,"file","file.new");
   await expect(page.locator("#profile-count")).toHaveText("0 profiles");
@@ -1281,6 +1286,7 @@ test("View/Layout/Render menu separation and optional AO/SSAA preserve source ge
   await openMenu(page,"render","dialog.render");
   const settings=page.locator("#render-dialog");
   await expect(settings).toBeVisible();
+  await openAoDiagnostics(page);
   await page.locator("#render-ao").check();
   await expect(page.locator("#preview")).toHaveAttribute("data-ao-enabled","true");
   await page.locator("#render-supersampling").selectOption("1.5");
@@ -1449,6 +1455,7 @@ test("independent floating views share render settings but not exact CAD geometr
   const host=page.locator("#floating-views-layer .floating-render-canvas").first();
   const originalVolume=await page.locator("#status").getAttribute("data-volume-mm3");
   await openMenu(page,"render","dialog.render");
+  await openAoDiagnostics(page);
   await page.locator("#render-ao").check();
   await page.locator("#render-supersampling").selectOption("1.5");
   await expect(host).toHaveAttribute("data-ao-enabled","true");
@@ -1582,6 +1589,7 @@ test("nonmodal render inspector tunes real edge lines and lighting without chang
   await openMenu(page,"render","dialog.render");
   const inspector=page.locator("#render-dialog");
   await expect(inspector).toBeVisible();
+  await expect(page.locator("#render-ao-diagnostics")).toHaveJSProperty("open",false);
   expect(await inspector.evaluate(el=>(el as HTMLDialogElement).matches(":modal"))).toBe(false);
   await expect(page.locator("#render-resolution-info")).toContainText("browser smooth or nearest canvas scaling");
   await page.locator("#render-lines-enabled").uncheck();
@@ -1603,6 +1611,7 @@ test("nonmodal render inspector tunes real edge lines and lighting without chang
   await expect(page.locator("#preview")).toHaveAttribute("data-ambient-light","0");
   const dark=await surface.screenshot();
   expect(Buffer.compare(wide,dark)).not.toBe(0);
+  await openAoDiagnostics(page);
   await page.locator("#render-ao").check();
   await expect(page.locator("#render-ao-radius")).toBeEnabled();
   await page.locator("#render-ao-radius").focus();
@@ -1632,9 +1641,11 @@ test("MSAA sample count is independent of AO and has truthful GPU limits",async(
   const solid=page.locator("#preview");
   await expect(solid).toHaveAttribute("data-msaa-requested","browser");
   await expect(solid).toHaveAttribute("data-msaa-effective","browser");
+  await openAoDiagnostics(page);
   await page.locator("#render-ao").check();
   await expect(solid).toHaveAttribute("data-msaa-effective","0");
   await expect(page.locator("#render-resolution-info")).toContainText("AO composer bypasses");
+  await openAoDiagnostics(page);
   await page.locator("#render-ao").uncheck();
   await page.locator("#render-msaa").selectOption("4");
   await expect(solid).toHaveAttribute("data-msaa-requested","4");
@@ -1642,11 +1653,13 @@ test("MSAA sample count is independent of AO and has truthful GPU limits",async(
   await expect.poll(async()=>Number(await solid.getAttribute("data-msaa-effective")))
     .toBeGreaterThanOrEqual(0);
   expect([0,2,4]).toContain(Number(await solid.getAttribute("data-msaa-effective")));
+  await openAoDiagnostics(page);
   await page.locator("#render-ao").check();
   await expect(solid).toHaveAttribute("data-ao-enabled","true");
   expect([0,2,4]).toContain(Number(await solid.getAttribute("data-msaa-effective")));
   await page.locator("#render-msaa").selectOption("0");
   await expect(solid).toHaveAttribute("data-msaa-effective","0");
+  await openAoDiagnostics(page);
   await page.locator("#render-ao").uncheck();
   await expect(solid).toHaveAttribute("data-msaa-path","offscreen");
   await page.locator("#render-msaa").selectOption("browser");
@@ -1769,6 +1782,7 @@ test("direct/offscreen colour parity and measurable AO on identical MSAA path",a
     await inspector.evaluate(el=>(el as HTMLElement).style.visibility="visible");
     return bytes;
   };
+  await openAoDiagnostics(page);
   await page.locator("#render-ao").uncheck();
   await page.locator("#render-supersampling").selectOption("1");
   await page.locator("#render-msaa").selectOption("browser");
@@ -1779,11 +1793,15 @@ test("direct/offscreen colour parity and measurable AO on identical MSAA path",a
   await page.locator("#render-msaa").selectOption("4");
   await expect(page.locator("#preview")).toHaveAttribute("data-msaa-path","offscreen");
   const offscreen4=await snap("offscreen-4msaa");
+  await openAoDiagnostics(page);
   await page.locator("#render-ao").check();
   await expect(page.locator("#preview")).toHaveAttribute("data-ao-enabled","true");
   await expect.poll(async()=>Number(await page.locator("#preview").getAttribute("data-ao-depth-max")))
     .toBeGreaterThan(0);
   const aoEnabled=await snap("ao-on-4msaa");
+  const depthRange=[await page.locator("#preview").getAttribute("data-ao-depth-min"),
+    await page.locator("#preview").getAttribute("data-ao-depth-max")];
+  await openAoDiagnostics(page);
   await page.locator("#render-ao").uncheck();
   const aoRestored=await snap("ao-off-4msaa");
   await page.locator("#render-msaa").selectOption("browser");
@@ -1794,14 +1812,20 @@ test("direct/offscreen colour parity and measurable AO on identical MSAA path",a
     aoOffVsOn:await renderPixelComparison(page,offscreen4,aoEnabled),
     aoRestoration:await renderPixelComparison(page,offscreen4,aoRestored),
     directRestoration:await renderPixelComparison(page,direct,restored),
-    depthRange:[await page.locator("#preview").getAttribute("data-ao-depth-min"),
-      await page.locator("#preview").getAttribute("data-ao-depth-max")]
+    depthRange
   };
   console.log("FLATCAD_RENDER_PARITY_EVIDENCE "+JSON.stringify(report));
   // Keep diagnostic first, enforce quantitative parity after evidence review.
   expect(report.defaultVsOffscreen4.modelPixels).toBeGreaterThan(100);
   expect(report.defaultVsOffscreen4.backgroundPixels).toBeGreaterThan(100);
   expect(report.aoOffVsOn.modelPixels).toBeGreaterThan(100);
+  // A direct/composer mismatch is not an intrinsic MSAA quality difference.
+  // Compare broad surfaces/backdrop; antialiased model edges may legitimately vary.
+  expect(report.defaultVsOffscreen4.fullMeanAbs).toBeLessThan(2);
+  expect(report.defaultVsOffscreen4.backgroundMeanAbs).toBeLessThan(1.5);
+  expect(report.directRestoration.fullMeanAbs).toBeLessThan(.2);
+  expect(Number(report.depthRange[0])).toBeGreaterThan(0);
+  expect(Number(report.depthRange[1])).toBeGreaterThan(Number(report.depthRange[0]));
   expect(await page.locator("#status").getAttribute("data-volume-mm3")).toBe(volume);
   expect(await page.evaluate(()=>localStorage.getItem("flatcad.project.v1"))).toBeNull();
 });
@@ -1822,4 +1846,38 @@ test("new CAD line defaults are one black CSS pixel and a single checkbox",async
   await page.locator('[data-close="render-dialog"]').last().click();
   await page.reload();
   await expect(page.locator("#preview")).toHaveAttribute("data-lines-enabled","true");
+});
+
+
+test("floating WebGL background remains transparent in direct and offscreen MSAA",async({page},testInfo)=>{
+  await page.setViewportSize({width:1440,height:820});
+  await page.goto("/");
+  await newProject(page);
+  await openMenu(page,"view","view.float");
+  const viewport=page.locator(".preview-panel");
+  await expect(viewport).toBeVisible();
+  const canvas=page.locator("#preview canvas");
+  const box=(await canvas.boundingBox())!;
+  const clip={x:Math.round(box.x+box.width/2-20),
+    y:Math.round(box.y+box.height/2-20),width:40,height:40};
+  // With an empty model and floating frame opacity=0, the WebGL background
+  // must reveal the same sketch pixels as a temporarily hidden canvas.
+  await canvas.evaluate(el=>(el as HTMLElement).style.visibility="hidden");
+  const underlying=await page.screenshot({clip,path:testInfo.outputPath("float-hidden-canvas.png")});
+  await canvas.evaluate(el=>(el as HTMLElement).style.visibility="visible");
+  await page.waitForTimeout(70);
+  const direct=await page.screenshot({clip,path:testInfo.outputPath("float-direct-transparent.png")});
+  await openMenu(page,"render","dialog.render");
+  await page.locator("#render-msaa").selectOption("4");
+  await expect(page.locator("#preview")).toHaveAttribute("data-msaa-path","offscreen");
+  await page.locator("#render-dialog").evaluate(el=>(el as HTMLElement).style.visibility="hidden");
+  await page.waitForTimeout(70);
+  const offscreen=await page.screenshot({clip,path:testInfo.outputPath("float-offscreen-transparent.png")});
+  const result={
+    direct:await renderPixelComparison(page,underlying,direct),
+    offscreen:await renderPixelComparison(page,underlying,offscreen)
+  };
+  console.log("FLATCAD_FLOAT_ALPHA_EVIDENCE "+JSON.stringify(result));
+  expect(result.direct.fullMeanAbs).toBeLessThan(3);
+  expect(result.offscreen.fullMeanAbs).toBeLessThan(3);
 });

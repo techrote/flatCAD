@@ -68,3 +68,52 @@ Windows Chromium/Firefox and Linux Firefox and independent owner physical GPU
 comparison are green. Physical owner checks focus on flat-face colour,
 transparent floating backgrounds, AO around holes and recesses, line width,
 antialiasing sample parity, 1–3 cameras and GPU load.
+
+
+## Verified source-tree measurements — 8 November 2026
+
+At the initial diagnostic checkpoint (before the compositor clear repair),
+the same 684×323px Chromium capture showed:
+- Direct Browser Default background RGBA: **[11,18,32,255]**
+- Offscreen explicit 0/4 MSAA background RGBA: **[59,75,99,255]**
+- Full-image direct vs 4 MSAA mean absolute RGB difference: **46.0/255**
+- Offscreen AO off vs on at fixed 4 MSAA: **0.0 RGB difference across every pixel**
+- Return to Browser Default: pixel-identical direct screenshot.
+
+This proves **no effective AO signal** on the exact demo geometry; a
+corrected `minDistance` alone does not establish a functioning SSAO
+implementation. Accordingly AO is now relegated to an **experimental
+diagnostics drawer collapsed by default**, not shown as a normal display
+quality feature. The normal render pipeline leaves AO off.
+
+Three.js r180 `RenderPass` sets its clear colour **before** binding the
+offscreen target. As a result, the clear colour is interpreted in the
+default target's sRGB space before the offscreen `OutputPass` encodes it
+again. The first correction prelinearizes only the offscreen clear
+colour and mirrors alpha state for transparent floating windows;
+no mesh surface shaders are rewritten.
+
+After the targeted correction, the same Chromium screenshot test
+reported:
+- Direct background: **[11,18,32,255]**
+- Offscreen 4 MSAA background: **[11,18,32,255]**
+- Full-image mean RGB difference: **0.533/255**, dominated by expected
+  changes in antialiasing edge coverage.
+- Background mean RGB difference: **0.406/255** (nearby edge fringes).
+- Offscreen AO on/off remained **pixel-identical**.
+- Returning to Browser Default remained pixel-identical.
+
+The qualification test now enforces mean image difference under 2/255
+and background difference under 1.5/255 on its fixed Chromium viewport.
+It also records floating-view opacity parity separately. This is strong
+colour-parity evidence for the tested environment, not yet a substitute
+for Firefox/NVIDIA hardware acceptance.
+
+### Follow-up for AO (not in product defaults)
+
+A future physically meaningful AO shader can be designed around a
+bounded orthographic clipping interval and per-object depth masks,
+then validated against known cavities. Its value should be established
+through *measured local darkening of rendered faces*, not by merely
+changing composer state. Keep the experimental toggle hidden until
+such evidence exists. Do not silently enable more expensive passes.

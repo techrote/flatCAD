@@ -157,3 +157,14 @@ making smaller fillets/recesses eligible for actual occlusion. The
 offscreen colour and transparency match to browser-default rendering is
 tracked separately with screenshot-based A/B tests (no CAD document changes).
 See [ADR-0012](docs/ADR-0012-RENDER-PARITY-AO-LINES.md).
+
+
+**AO qualification:** The old SSAO thresholds were ineffective on
+millimetre-scale parts, and a controlled AO on/off screenshot test
+still shows no measurable occlusion after correcting them. AO therefore
+remains disabled by default, behind the collapsed *Experimental AO
+diagnostics* section rather than in the main render controls. The
+offscreen MSAA compositor now uses a parity-calibrated background
+clear colour, matching the original direct dark backdrop in the
+Chromium A/B test; matching transparency on floating views remains a
+separate acceptance check.
