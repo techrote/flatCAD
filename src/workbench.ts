@@ -1734,16 +1734,22 @@ document.addEventListener("keydown",event=>{
     }catch(error){byId("shortcut-error").textContent=String(error);}
     return;
   }
-  if(canvasShortcutsBlocked(event))return;
-  if(!byId("extrude-flyout").hidden){
+  if(MODAL_SHORTCUT_BLOCKERS.some(id=>dialog(id).open))return;
+  const inRenderInspector=event.target instanceof Element &&
+    Boolean(event.target.closest("#render-dialog"));
+  // Contextual CAD Enter/Escape must take priority when an extrusion numeric
+  // field has focus. These existing tool controls deliberately use Enter to
+  // commit. Do not apply those contextual actions to keys in Render controls.
+  if(!inRenderInspector&&!byId("extrude-flyout").hidden){
     if(event.code==="Escape"){event.preventDefault();closeExtrude();setTool("select");return;}
     if(event.code==="Enter"){event.preventDefault();applyExtrude();return;}
   }
-  if(activeTool==="line"){
+  if(!inRenderInspector&&activeTool==="line"){
     if(event.code==="Escape"){event.preventDefault();canvas.cancelLine();return;}
     if(event.code==="Enter"){event.preventDefault();canvas.finishLine(false);return;}
     if(event.code==="Backspace"){event.preventDefault();canvas.removeLastLinePoint();return;}
   }
+  if(nativeInputOwnsKey(event))return;
   // Non-text inspector controls can retain focus after using the Render
   // panel; nativeInputOwnsKey has already protected their adjustment keys.
   let chord=chordFromEvent(event);
