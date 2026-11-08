@@ -1694,14 +1694,33 @@ const MODAL_SHORTCUT_BLOCKERS=[
   "shortcuts-dialog","grid-dialog","navigation-dialog",
   "text-dialog","layout-dialog","parameters-dialog"
 ] as const;
+/** Preserve the browser's native editing/keyboard controls without allowing
+ * nonmodal inspector focus to disable every CAD shortcut. Browser show()
+ * normally focuses a button inside the dialog, and range inputs keep focus
+ * after pointer drags. Neither should own unmodified R/C/E/G tool chords.
+ */
+function nativeInputOwnsKey(event:KeyboardEvent):boolean{
+  const target=event.target;
+  if(!(target instanceof Element))return false;
+  if(target.closest('textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"]'))
+    return true;
+  const input=target.closest("input");
+  if(input){
+    const type=(input.getAttribute("type")||"text").toLowerCase();
+    if(!["range","checkbox","radio","color"].includes(type))return true;
+    // Sliders, toggles and colour pickers retain their native keyboard
+    // navigation, activation and adjustment keys.
+    return ["Space","Enter","Home","End","PageUp","PageDown"].includes(event.code)||
+      event.code.startsWith("Arrow");
+  }
+  // Space/Enter activate focusable controls, even in the nonmodal inspector.
+  if((event.code==="Space"||event.code==="Enter")&&
+    target.closest("button,summary,[role='button']"))return true;
+  return false;
+}
 function canvasShortcutsBlocked(event:KeyboardEvent):boolean{
-  if(MODAL_SHORTCUT_BLOCKERS.some(id=>dialog(id).open))return true;
-  // Render is deliberately NON-modal. CAD shortcuts remain available in the
-  // workspace even when the inspector is open. Never hijack keyboard use
-  // inside the inspector's controls, including its buttons and disclosure.
-  return dialog("render-dialog").open &&
-    event.target instanceof Element &&
-    Boolean(event.target.closest("#render-dialog"));
+  return MODAL_SHORTCUT_BLOCKERS.some(id=>dialog(id).open)||
+    nativeInputOwnsKey(event);
 }
 document.addEventListener("keydown",event=>{
   if(shortcutRecording){
@@ -1725,8 +1744,8 @@ document.addEventListener("keydown",event=>{
     if(event.code==="Enter"){event.preventDefault();canvas.finishLine(false);return;}
     if(event.code==="Backspace"){event.preventDefault();canvas.removeLastLinePoint();return;}
   }
-  const target=event.target as HTMLElement;
-  if(target.closest("input,textarea,select,[contenteditable]"))return;
+  // Non-text inspector controls can retain focus after using the Render
+  // panel; nativeInputOwnsKey has already protected their adjustment keys.
   let chord=chordFromEvent(event);
   // Ctrl/Command shortcuts map to one user-facing preference unless rebound.
   if(event.metaKey&&!event.ctrlKey)chord=chord.replace("Meta+","Control+");
@@ -1740,9 +1759,7 @@ document.addEventListener("keydown",event=>{
   }
 });
 document.addEventListener("keydown",event=>{
-  if(event.code==="Space"&&!event.repeat&&
-    !(event.target as HTMLElement).closest("input,textarea,select,[contenteditable]")&&
-    !canvasShortcutsBlocked(event)){
+  if(event.code==="Space"&&!event.repeat&&!canvasShortcutsBlocked(event)){
     if(activeTool!=="pan"){event.preventDefault();priorTool=activeTool;setTool("pan");}
   }
 });

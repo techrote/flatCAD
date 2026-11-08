@@ -1975,14 +1975,24 @@ test("nonmodal Render inspector does not disable CAD shortcuts, Space pan, or mo
   await expect(page.locator("#status")).toContainText("Exact solid generated");
   await openMenu(page,"render","dialog.render");
   await expect(page.locator("#render-dialog")).toBeVisible();
-  await page.locator(".sketch-titlebar").click();
+  // Reproduce physical user behavior: the nonmodal dialog may autofocus its
+  // first button. Do not click Sketch to artificially repair document focus.
+  await page.locator('#render-dialog [data-close="render-dialog"]').first().focus();
   await page.keyboard.press("r");
   await expect(page.locator('[data-tool="rectangle"]')).toHaveClass(/active/);
-  // Focused inspector controls are UI inputs, not shortcut triggers.
+  // Nonmodal HTMLDialogElement.show() and pointer-adjusted range inputs
+  // retain focus in the panel. Letter shortcuts MUST still work there.
   await page.locator("#render-edge-width").focus();
   await page.keyboard.press("c");
-  await expect(page.locator('[data-tool="rectangle"]')).toHaveClass(/active/);
+  await expect(page.locator('[data-tool="circle"]')).toHaveClass(/active/);
+  const before=await page.locator("#render-edge-width").inputValue();
+  await page.keyboard.press("ArrowRight");
+  expect(await page.locator("#render-edge-width").inputValue()).not.toBe(before);
+  await expect(page.locator('[data-tool="circle"]')).toHaveClass(/active/);
   await page.locator("#render-reset").focus();
+  await page.keyboard.press("r");
+  await expect(page.locator('[data-tool="rectangle"]')).toHaveClass(/active/);
+  await page.locator("#render-msaa").focus();
   await page.keyboard.press("c");
   await expect(page.locator('[data-tool="rectangle"]')).toHaveClass(/active/);
   // Outside the nonmodal inspector, temporary Space-pan must still operate.
@@ -2021,4 +2031,44 @@ test("new floating-window backgrounds use subtle opacity without overriding user
   await expect(page.locator("#float-opacity")).toHaveValue("0");
   expect(await frame.evaluate(el=>getComputedStyle(el).backgroundColor))
     .toMatch(/rgba\(11, 18, 32, 0\)/);
+});
+
+test("nonmodal Render keyboard focus keeps CAD shortcuts live without a sketch click",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await openMenu(page,"render","dialog.render");
+  const inspector=page.locator("#render-dialog");
+  await expect(inspector).toBeVisible();
+  const tool=async(which:string)=>expect(page.locator('[data-tool="'+which+'"]')).toHaveClass(/active/);
+  // Real UI workflow: open settings, use a control, then press tool shortcuts
+  // without an intervening click on the CAD canvas or titlebar.
+  await inspector.locator('[data-close="render-dialog"]').first().focus();
+  await page.keyboard.press("r");
+  await tool("rectangle");
+  await page.locator("#render-edge-width").focus();
+  await page.keyboard.press("c");
+  await tool("circle");
+  await page.keyboard.press("l");
+  await tool("line");
+  // Native keyboard editing inside a range must not steal its arrows.
+  const before=await page.locator("#render-edge-width").inputValue();
+  await page.keyboard.press("ArrowRight");
+  expect(await page.locator("#render-edge-width").inputValue()).not.toBe(before);
+  await tool("line");
+  // Editable dropdown remains native; letter keys must NOT change CAD tools.
+  await page.locator("#render-msaa").focus();
+  await page.keyboard.press("r");
+  await tool("line");
+  await page.locator("#render-clean-preset").focus();
+  await page.keyboard.press("v");
+  await tool("select");
+  await page.keyboard.press("g");
+  await expect(page.locator("#grid-dialog")).toBeVisible();
+  await page.locator('[data-close="grid-dialog"]').last().click();
+  await page.locator("#render-edge-width").focus();
+  await page.keyboard.press("r");
+  await tool("rectangle");
+  await inspector.locator('[data-close="render-dialog"]').last().click();
+  await page.keyboard.press("c");
+  await tool("circle");
 });
