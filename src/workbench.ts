@@ -50,6 +50,7 @@ root.innerHTML=[
   '      <button data-menu="view" class="menu-trigger">View</button>',
   '      <button data-menu="layout" class="menu-trigger">Layout</button>',
   '      <button data-menu="render" class="menu-trigger">Render</button>',
+  '      <button data-menu="keybinds" class="menu-trigger">Keybinds</button>',
   '      <button data-menu="settings" class="menu-trigger">Settings</button>',
   '      <div id="menu-popover" class="menu-popover" hidden role="menu"></div>',
   '    </nav>',
@@ -1221,6 +1222,9 @@ const MENU:Record<string,[string,string][]> = {
  layout:[["Workspace tiles…","dialog.layout"],["Float solid","view.float"],["Dock solid","view.dock"],
    ["Show tiled Solid","view.solid.show"],["Hide tiled Solid","view.solid.hide"]],
  render:[["Effects and antialiasing…","dialog.render"],["Toggle ambient occlusion","render.toggle-ao"]],
+ keybinds:[["View / reassign all…","dialog.shortcuts"],
+   ...Object.entries(ACTION_LABELS).map(([action,label]):[string,string]=>
+     [label,"keybind.reassign."+action])],
  settings:[["Keyboard shortcuts…","dialog.shortcuts"],["Grid and snapping…","dialog.grid"],
    ["Sketch text…","dialog.text"],
    ["CAD navigation controls…","dialog.navigation"],
@@ -1231,13 +1235,16 @@ function closeMenu():void{activeMenu=null;byId("menu-popover").hidden=true;}
 function openMenu(name:string):void{
   if(activeMenu===name){closeMenu();return;}
   activeMenu=name;const panel=byId("menu-popover");panel.replaceChildren();
+  panel.classList.toggle("keybinds-popover",name==="keybinds");
   const anchor=document.querySelector<HTMLElement>('[data-menu="'+name+'"]');
-  if(anchor){panel.style.left=Math.max(0,anchor.offsetLeft)+"px";}
   for(const [label,action] of MENU[name]||[]){
     const b=document.createElement("button");
     b.dataset.command=action;b.setAttribute("role","menuitem");
     b.textContent=label;
-    const chord=prefs.shortcuts[action as ShortcutAction];
+    const keybindAction=action.startsWith("keybind.reassign.")
+      ?action.slice("keybind.reassign.".length) as ShortcutAction
+      :action as ShortcutAction;
+    const chord=prefs.shortcuts[keybindAction];
     if(chord){
       const hint=document.createElement("span");hint.textContent=displayShortcut(chord);hint.className="menu-shortcut";b.append(hint);
     }
@@ -1245,8 +1252,17 @@ function openMenu(name:string):void{
     panel.append(b);
   }
   panel.hidden=false;
+  // A near-right-edge menu must not extend beyond the topbar/viewport.
+  // Measure after contents are mounted; no extra layout or new menu surface.
+  if(anchor)panel.style.left=Math.max(0,Math.min(anchor.offsetLeft,
+    (panel.parentElement?.clientWidth??0)-panel.getBoundingClientRect().width))+"px";
 }
 function command(action:string):void{
+  if(action.startsWith("keybind.reassign.")){
+    const binding=action.slice("keybind.reassign.".length) as ShortcutAction;
+    if(Object.prototype.hasOwnProperty.call(ACTION_LABELS,binding))showShortcuts(binding);
+    return;
+  }
   if(action.startsWith("tool.")){setTool(action.slice(5) as SketchTool);return;}
   switch(action){
     case "feature.extrude":openExtrude();break;
@@ -1294,8 +1310,16 @@ function command(action:string):void{
   }
 }
 function dialog(id:string):HTMLDialogElement{return byId<HTMLDialogElement>(id);}
-function showShortcuts():void{
-  closeMenu();renderShortcuts();dialog("shortcuts-dialog").showModal();
+function showShortcuts(binding?:ShortcutAction):void{
+  closeMenu();shortcutRecording=null;renderShortcuts();
+  const panel=dialog("shortcuts-dialog");
+  if(!panel.open)panel.showModal();
+  if(binding){
+    // Clicking a current Keybinds entry enters the existing validated
+    // recording flow. There is no second shortcut store or duplicate logic.
+    byId("shortcut-rows").querySelector<HTMLButtonElement>(
+      '[data-action="'+binding+'"]')?.click();
+  }
 }
 function renderShortcuts():void {
   const area=byId("shortcut-rows");area.replaceChildren();
@@ -1308,6 +1332,9 @@ function renderShortcuts():void {
     key.onclick=()=>{
       shortcutRecording=action;byId("shortcut-error").textContent="Press a key combination · Esc to cancel";
       renderShortcuts();
+      // The old row button was replaced by renderShortcuts().
+      byId("shortcut-rows").querySelector<HTMLButtonElement>(
+        '[data-action="'+action+'"]')?.focus();
     };
     const clear=document.createElement("button");clear.className="text-button";clear.textContent="Clear";
     clear.onclick=()=>{
@@ -1678,6 +1705,12 @@ input("settings-input").onchange=async event=>{
 };
 document.querySelectorAll<HTMLButtonElement>("[data-close]").forEach(el=>{
   el.onclick=()=>dialog(el.dataset.close!).close();
+});
+// Escape from the editor and closing without assigning must never leave the
+// global key handler stuck in shortcut-recording mode.
+dialog("shortcuts-dialog").addEventListener("close",()=>{
+  shortcutRecording=null;
+  byId("shortcut-error").textContent="";
 });
 button("shortcut-reset").onclick=()=>{
   prefs=validatePreferences({...prefs,shortcuts:{...defaultPreferences().shortcuts}});

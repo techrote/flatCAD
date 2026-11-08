@@ -158,3 +158,20 @@ The Sketch toolbar has an explicit **Dock / Undock** title-bar control. Docking 
 The global bottom status bar is removed. Undo/Redo and Grid move to the Sketch header, along with tool dock, zoom and profile count. The exact solid volume moves to the Solid header. During uncommitted Add/Cut preview, that header explicitly shows the provisional volume. Errors appear as a contextual overlay; non-error status continues to be available in the accessibility status region.
 
 **Acceptance:** real browser tests must resize both dividers with pointer gestures, confirm nonzero canvas dimensions and split persistence, test keyboard/stacked layout, dock/undock/reload without loss of shortcuts, verify newest-first tiles and hidden controls until clicked, and check title-bar commands plus volume and disappearance of the permanent footer. All these are UI mutations only; the native CAD document cannot be changed by resizing/docking.
+
+## Tool-aware crosshair and Keybinds menu (experimental follow-up)
+
+Tool-state glyph cues appear near, not on, the actual Sketch input hotspot. The native
+crosshair remains precise: draw tools place their existing toolbar symbol below-left
+of the pointer inside Sketch; when approaching an edge the cue flips to remain
+within view. These presentation-only elements have `pointer-events:none`,
+hide on pointer leave and for Select/Pan, and immediately track keyboard tool
+selection without an extra Sketch click. They do not change snapping or
+the model's physical coordinates.
+
+The new **Keybinds** top menu shows the live assignments of all actions,
+including user rebindings. Clicking a specific binding launches the existing
+modal validated recording flow; selecting "View / reassign all" reveals the
+full editor. The Settings menu and K shortcut remain available. Closing the
+editor must clear any unfinished recording so no subsequent global CAD key is
+intercepted. Pointer, keyboard and reload acceptance are required.

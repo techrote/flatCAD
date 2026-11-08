@@ -2,6 +2,7 @@ import { newId, type CadDocument, type Point2, type Profile } from "./model";
 import { centre, distance, handles, hit, isClosed, isSimplePolygon, moveHandle, outline, snapPoints, translate } from "./geometry";
 import type { Preferences } from "./preferences";
 import { draftProfile, type DrawTool } from "./draw-primitives";
+import {SKETCH_TOOL_GLYPHS,toolBadgePosition} from "./tool-cursor";
 
 export type SketchTool =
   | "select" | "line" | "rectangle" | "centerRectangle" | "circle" | "polygon" | "slot" | "pan" | "extrude";
@@ -49,6 +50,8 @@ export class SketchCanvas {
   private extrude:{id:string,depth:number}|null=null;
   private slotRadius=3;
   private lastPointer:Point2|null=null;
+  private readonly toolBadge:HTMLSpanElement;
+  private pointerOnSketch=false;
 
   constructor(
     private readonly canvas:HTMLCanvasElement,
@@ -60,6 +63,16 @@ export class SketchCanvas {
     if(!ctx)throw new Error("Canvas 2D is not supported");
     this.ctx=ctx;
     this.doc=initial;this.prefs=prefs;
+    const badge=document.createElement("span");
+    badge.className="sketch-tool-cursor";
+    badge.setAttribute("aria-hidden","true");
+    badge.hidden=true;
+    // Sketch-wrap is a positioned container; this overlay never intercepts
+    // pointer events or changes model/sketch coordinate transforms.
+    const wrap=canvas.parentElement;
+    if(!wrap)throw Error("Sketch canvas requires a positioned wrapper");
+    wrap.append(badge);
+    this.toolBadge=badge;
     // The sketch canvas cannot be dragged as a DOM element/background. Only
     // the explicit Pan tool or middle mouse button moves its world viewport.
     canvas.draggable=false;
@@ -69,11 +82,13 @@ export class SketchCanvas {
     canvas.addEventListener("selectstart",event=>event.preventDefault());
     this.observer=new ResizeObserver(()=>this.resize());
     this.observer.observe(canvas);this.resize();
+    canvas.addEventListener("pointerenter",e=>this.updateToolBadge(e));
+    canvas.addEventListener("pointerleave",()=>this.hideToolBadge());
     canvas.addEventListener("pointerdown",e=>this.pointerDown(e));
     canvas.addEventListener("pointermove",e=>this.pointerMove(e));
     canvas.addEventListener("pointerup",e=>this.pointerUp(e));
     canvas.addEventListener("pointercancel",()=>{
-      this.gesture=null;this.draw();
+      this.gesture=null;this.hideToolBadge();this.draw();
     });
     canvas.addEventListener("wheel",e=>this.wheel(e),{passive:false});
     canvas.addEventListener("contextmenu",e=>e.preventDefault());
@@ -90,6 +105,7 @@ export class SketchCanvas {
     this.cancelPendingDraw(false);
     this.tool=tool;this.gesture=null;
     this.canvas.style.cursor=tool==="pan"?"grab":tool==="select"?"default":"crosshair";
+    this.refreshToolBadge();
     this.draw();
   }
   setSlotRadius(r:number):void {if(Number.isFinite(r)&&r>0)this.slotRadius=r;}
@@ -118,7 +134,7 @@ export class SketchCanvas {
     };
   }
   getViewport():{width:number;height:number}{return {width:this.width,height:this.height};}
-  dispose():void {this.observer.disconnect();}
+  dispose():void {this.observer.disconnect();this.toolBadge.remove();}
   hasPendingLine():boolean{return this.linePoints.length>0;}
   cancelLine():void {this.linePoints=[];this.lineCursor=null;this.draw();}
   removeLastLinePoint():void {this.linePoints.pop();this.draw();}
@@ -153,6 +169,32 @@ export class SketchCanvas {
   private screen(event:PointerEvent|WheelEvent):Point2 {
     const rect=this.canvas.getBoundingClientRect();
     return {x:event.clientX-rect.left,y:event.clientY-rect.top};
+  }
+  private refreshToolBadge():void{
+    const glyph=SKETCH_TOOL_GLYPHS[this.tool];
+    this.toolBadge.hidden=!glyph||!this.pointerOnSketch;
+    if(glyph){
+      this.toolBadge.textContent=glyph;
+      this.toolBadge.dataset.tool=this.tool;
+    }else{
+      this.toolBadge.textContent="";
+      delete this.toolBadge.dataset.tool;
+    }
+  }
+  private updateToolBadge(event:PointerEvent):void{
+    const point=this.screen(event);
+    this.pointerOnSketch=point.x>=0&&point.x<=this.width&&
+      point.y>=0&&point.y<=this.height;
+    if(this.pointerOnSketch){
+      const pos=toolBadgePosition(point,{width:this.width,height:this.height});
+      this.toolBadge.style.left=pos.x+"px";
+      this.toolBadge.style.top=pos.y+"px";
+    }
+    this.refreshToolBadge();
+  }
+  private hideToolBadge():void{
+    this.pointerOnSketch=false;
+    this.toolBadge.hidden=true;
   }
   private world(point:Point2):Point2 {
     return {x:(point.x-this.panX)/this.zoom,y:(this.panY-point.y)/this.zoom};
@@ -284,6 +326,7 @@ export class SketchCanvas {
   private pointerMove(event:PointerEvent):void {
     const screen=this.screen(event);
     this.lastPointer=screen;
+    this.updateToolBadge(event);
     if(this.tool==="line"&&this.linePoints.length)
       this.lineCursor=this.maybeSnap(this.world(screen),event);
     if(!this.gesture){
