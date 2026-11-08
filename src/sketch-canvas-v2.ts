@@ -175,10 +175,10 @@ export class SketchCanvas {
     this.toolBadge.hidden=!glyph||!this.pointerOnSketch;
     if(glyph){
       this.toolBadge.textContent=glyph;
-      this.toolBadge.dataset.tool=this.tool;
+      this.toolBadge.dataset.cursorTool=this.tool;
     }else{
       this.toolBadge.textContent="";
-      delete this.toolBadge.dataset.tool;
+      delete this.toolBadge.dataset.cursorTool;
     }
   }
   private updateToolBadge(event:PointerEvent):void{

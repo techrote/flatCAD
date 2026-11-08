@@ -2085,7 +2085,7 @@ test("selected sketch tools show an offset glyph next to, not across, the native
   await page.keyboard.press("l");
   const badge=page.locator(".sketch-tool-cursor");
   await expect(badge).toBeVisible();
-  await expect(badge).toHaveAttribute("data-tool","line");
+  await expect(badge).toHaveAttribute("data-cursor-tool","line");
   await expect(badge).toHaveText("╱");
   await expect(canvas).toHaveCSS("cursor","crosshair");
   const box=(await badge.boundingBox())!;
@@ -2093,10 +2093,10 @@ test("selected sketch tools show an offset glyph next to, not across, the native
   expect(box.y).toBeGreaterThan(at.y+7);
   expect(await badge.evaluate(el=>getComputedStyle(el).pointerEvents)).toBe("none");
   await page.keyboard.press("r");
-  await expect(badge).toHaveAttribute("data-tool","rectangle");
+  await expect(badge).toHaveAttribute("data-cursor-tool","rectangle");
   await expect(badge).toHaveText("▭");
   await page.keyboard.press("Shift+r");
-  await expect(badge).toHaveAttribute("data-tool","centerRectangle");
+  await expect(badge).toHaveAttribute("data-cursor-tool","centerRectangle");
   await expect(badge).toHaveText("▣");
   await page.keyboard.press("c");
   await expect(badge).toHaveText("◯");
