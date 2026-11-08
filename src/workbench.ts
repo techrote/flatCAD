@@ -163,7 +163,7 @@ root.innerHTML=[
   '  <div class="dialog-scroll"><label class="field"><span>Desktop layout</span><select id="tile-mode"><option value="split">Sketch + Solid with inspector below</option><option value="columns">Three adjustable columns</option><option value="float">Float — movable, resizable Solid viewport</option></select></label>',
   '  <div id="tile-order" class="tile-order" aria-label="Tile arrangement"></div>',
   '  <label class="layout-tile-visibility"><input id="tiled-solid-visible" type="checkbox" checked> Show tiled Solid viewport</label>',
-  '  <label class="layout-float-opacity"><span>Floating-window background opacity <output id="float-opacity-value">0%</output></span><input id="float-opacity" type="range" min="0" max="100" step="5" value="0" aria-label="Floating-window background opacity"></label></div>',
+  '  <label class="layout-float-opacity"><span>Floating-window background opacity <output id="float-opacity-value">20%</output></span><input id="float-opacity" type="range" min="0" max="100" step="5" value="20" aria-label="Floating-window background opacity"></label></div>',
   '  <footer><button id="tile-reset" class="button">Reset workspace</button><button data-close="layout-dialog" class="button primary">Done</button></footer></dialog>',
   '<dialog id="render-dialog" class="settings-dialog render-inspector"><div class="dialog-head"><div><strong>Render inspector</strong><small>Live display tuning · native CAD remains unchanged</small></div><button data-close="render-dialog" aria-label="Close render inspector">×</button></div>',
   '  <div class="dialog-scroll"><fieldset class="render-group"><legend>Antialiasing</legend>',
@@ -1690,6 +1690,19 @@ button("grid-reset").onclick=()=>{
 button("settings-export").onclick=exportSettings;
 button("settings-import").onclick=()=>input("settings-input").click();
 
+const MODAL_SHORTCUT_BLOCKERS=[
+  "shortcuts-dialog","grid-dialog","navigation-dialog",
+  "text-dialog","layout-dialog","parameters-dialog"
+] as const;
+function canvasShortcutsBlocked(event:KeyboardEvent):boolean{
+  if(MODAL_SHORTCUT_BLOCKERS.some(id=>dialog(id).open))return true;
+  // Render is deliberately NON-modal. CAD shortcuts remain available in the
+  // workspace even when the inspector is open. Never hijack keyboard use
+  // inside the inspector's controls, including its buttons and disclosure.
+  return dialog("render-dialog").open &&
+    event.target instanceof Element &&
+    Boolean(event.target.closest("#render-dialog"));
+}
 document.addEventListener("keydown",event=>{
   if(shortcutRecording){
     event.preventDefault();event.stopPropagation();
@@ -1702,7 +1715,7 @@ document.addEventListener("keydown",event=>{
     }catch(error){byId("shortcut-error").textContent=String(error);}
     return;
   }
-  if(["shortcuts-dialog","grid-dialog","navigation-dialog","text-dialog","layout-dialog","parameters-dialog","render-dialog"].some(x=>dialog(x).open))return;
+  if(canvasShortcutsBlocked(event))return;
   if(!byId("extrude-flyout").hidden){
     if(event.code==="Escape"){event.preventDefault();closeExtrude();setTool("select");return;}
     if(event.code==="Enter"){event.preventDefault();applyExtrude();return;}
@@ -1727,8 +1740,9 @@ document.addEventListener("keydown",event=>{
   }
 });
 document.addEventListener("keydown",event=>{
-  if(event.code==="Space"&&!event.repeat&&!(event.target as HTMLElement).closest("input,textarea,select")&&
-    !["shortcuts-dialog","grid-dialog","navigation-dialog","text-dialog","layout-dialog","parameters-dialog","render-dialog"].some(x=>dialog(x).open)){
+  if(event.code==="Space"&&!event.repeat&&
+    !(event.target as HTMLElement).closest("input,textarea,select,[contenteditable]")&&
+    !canvasShortcutsBlocked(event)){
     if(activeTool!=="pan"){event.preventDefault();priorTool=activeTool;setTool("pan");}
   }
 });

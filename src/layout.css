@@ -418,7 +418,7 @@
  * Controls remain pointer-accessible over transparent rendered pixels. */
 .workbench-layout.float-solid .preview-panel{
   border:1px solid rgba(115,166,204,.65);
-  background:rgba(11,18,32,var(--flatcad-float-opacity,0));
+  background:rgba(11,18,32,var(--flatcad-float-opacity,.2));
   border-radius:8px;
   box-shadow:0 0 0 1px rgba(7,22,36,.35),0 7px 19px #04121e50;
 }
@@ -448,7 +448,7 @@
 .floating-render-view{
   position:absolute;width:min(380px,48vw);height:min(340px,50vh);
   min-width:220px;min-height:180px;
-  background:rgba(11,18,32,var(--flatcad-float-opacity,0));border:1px solid rgba(115,166,204,.68);
+  background:rgba(11,18,32,var(--flatcad-float-opacity,.2));border:1px solid rgba(115,166,204,.68);
   border-radius:8px;box-shadow:0 0 0 1px #07162450,0 7px 19px #04121e50;
   pointer-events:auto;overflow:hidden;
 }

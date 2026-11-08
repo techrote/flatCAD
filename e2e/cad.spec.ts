@@ -1921,6 +1921,9 @@ test("Render inspector exposes MSAA controls outside collapsed AO diagnostics in
 });
 test("floating WebGL background remains transparent in direct and offscreen MSAA",async({page},testInfo)=>{
   await page.setViewportSize({width:1440,height:820});
+  // The user-adjustable window background now defaults to 20% opacity.
+  // Test the explicit fully transparent setting for pixel-accurate alpha parity.
+  await page.addInitScript(()=>localStorage.setItem("flatcad.float-opacity.v1","0"));
   await page.goto("/");
   await newProject(page);
   await openMenu(page,"view","view.float");
@@ -1964,4 +1967,57 @@ test("floating WebGL background remains transparent in direct and offscreen MSAA
   console.log("FLATCAD_FLOAT_ALPHA_EVIDENCE "+JSON.stringify(result));
   expect(result.direct.fullMeanAbs).toBeLessThan(3);
   expect(result.offscreen.fullMeanAbs).toBeLessThan(3);
+});
+
+test("nonmodal Render inspector does not disable CAD shortcuts, Space pan, or modal guards",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await openMenu(page,"render","dialog.render");
+  await expect(page.locator("#render-dialog")).toBeVisible();
+  await page.locator(".sketch-titlebar").click();
+  await page.keyboard.press("r");
+  await expect(page.locator('[data-tool="rectangle"]')).toHaveClass(/active/);
+  // Focused inspector controls are UI inputs, not shortcut triggers.
+  await page.locator("#render-edge-width").focus();
+  await page.keyboard.press("c");
+  await expect(page.locator('[data-tool="rectangle"]')).toHaveClass(/active/);
+  await page.locator("#render-reset").focus();
+  await page.keyboard.press("c");
+  await expect(page.locator('[data-tool="rectangle"]')).toHaveClass(/active/);
+  // Outside the nonmodal inspector, temporary Space-pan must still operate.
+  await page.locator(".sketch-titlebar").click();
+  await page.keyboard.down("Space");
+  await expect(page.locator('[data-tool="pan"]')).toHaveClass(/active/);
+  await page.keyboard.up("Space");
+  await expect(page.locator('[data-tool="rectangle"]')).toHaveClass(/active/);
+  await page.keyboard.press("g");
+  await expect(page.locator("#grid-dialog")).toBeVisible();
+  // A real modal dialog must suppress sketch shortcuts.
+  await page.keyboard.press("c");
+  await expect(page.locator('[data-tool="rectangle"]')).toHaveClass(/active/);
+  await page.locator('[data-close="grid-dialog"]').last().click();
+  await page.locator(".sketch-titlebar").click();
+  await page.keyboard.press("c");
+  await expect(page.locator('[data-tool="circle"]')).toHaveClass(/active/);
+  await expect(page.locator("#render-dialog")).toBeVisible();
+  await page.locator('[data-close="render-dialog"]').last().click();
+  await page.keyboard.press("r");
+  await expect(page.locator('[data-tool="rectangle"]')).toHaveClass(/active/);
+});
+test("new floating-window backgrounds use subtle opacity without overriding user 0%",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await expect(page.locator("#float-opacity")).toHaveValue("20");
+  await expect(page.locator("#float-opacity-value")).toHaveText("20%");
+  await openMenu(page,"view","view.float.new");
+  const frame=page.locator(".floating-render-view").first();
+  await expect(frame).toBeVisible();
+  expect(await frame.evaluate(el=>getComputedStyle(el).backgroundColor))
+    .toMatch(/rgba\(11, 18, 32, 0\.2\)/);
+  await page.evaluate(()=>localStorage.setItem("flatcad.float-opacity.v1","0"));
+  await page.reload();
+  await expect(frame).toBeVisible();
+  await expect(page.locator("#float-opacity")).toHaveValue("0");
+  expect(await frame.evaluate(el=>getComputedStyle(el).backgroundColor))
+    .toMatch(/rgba\(11, 18, 32, 0\)/);
 });
