@@ -1583,7 +1583,7 @@ test("nonmodal render inspector tunes real edge lines and lighting without chang
   const inspector=page.locator("#render-dialog");
   await expect(inspector).toBeVisible();
   expect(await inspector.evaluate(el=>(el as HTMLDialogElement).matches(":modal"))).toBe(false);
-  await expect(page.locator("#render-resolution-info")).toContainText("browser compositor downsampling");
+  await expect(page.locator("#render-resolution-info")).toContainText("browser smooth or nearest canvas scaling");
   await page.locator("#render-edge-mode").selectOption("hidden");
   await expect(page.locator("#preview")).toHaveAttribute("data-edge-mode","hidden");
   await expect(floatHost).toHaveAttribute("data-edge-mode","hidden");
@@ -1660,10 +1660,15 @@ test("experimental 8x SSAA exposes requested/effective ratio, budget and downsam
   await openMenu(page,"view","view.float.new");
   const frame=page.locator(".floating-render-canvas").first();
   await expect(frame).toHaveAttribute("data-rendered-solid","true");
+  // Only the visible floating render should allocate high-res attachments.
+  await openMenu(page,"view","view.solid.hide");
+  const hiddenTiled=page.locator("#preview canvas");
+  const hiddenWidth=await hiddenTiled.evaluate(el=>(el as HTMLCanvasElement).width);
   await openMenu(page,"render","dialog.render");
   await page.locator("#render-pixel-budget").selectOption("32000000");
   await page.locator("#render-supersampling").selectOption("8");
   await expect(frame).toHaveAttribute("data-supersample","8");
+  expect(await hiddenTiled.evaluate(el=>(el as HTMLCanvasElement).width)).toBe(hiddenWidth);
   const effective=Number(await frame.getAttribute("data-effective-supersample"));
   expect(effective).toBeGreaterThan(7);
   const canvas=frame.locator("canvas");

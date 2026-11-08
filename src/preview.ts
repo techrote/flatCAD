@@ -744,7 +744,16 @@ export class Preview {
     this.container.dataset.ambientLight=String(settings.ambientLight);
     this.container.dataset.keyLight=String(settings.keyLight);
     this.container.dataset.aoRadius=String(settings.aoRadius);
-    const width=Math.max(1,this.container.clientWidth),height=Math.max(1,this.container.clientHeight);
+    const width=this.container.clientWidth,height=this.container.clientHeight;
+    if(width<2||height<2||!this.container.isConnected){
+      // A hidden tiled Solid must not enlarge its previous WebGL buffer
+      // when the user requests 8× on a visible independent floating view.
+      // ResizeObserver will apply the stored settings upon reappearance.
+      this.renderer.domElement.style.imageRendering=
+        settings.downsampleMode==="nearest"?"pixelated":"auto";
+      this.container.dataset.downsampleMode=settings.downsampleMode;
+      return;
+    }
     this.configureRenderBuffers(width,height);
     this.resize();
     this.requestRender();
