@@ -1223,14 +1223,14 @@ test("floating render face click reaches the armed extrude depth rather than sta
   await expect(page.locator("#preview")).not.toHaveAttribute("data-float-dragging","true");
 });
 
-test("floating viewport has visible boundary and icon-only home/fit/opposite/underground controls",async({page})=>{
+test("floating viewport has visible boundary and one context-aware Home button",async({page})=>{
   await page.goto("/");
   await expect(page.locator("#status")).toContainText("Exact solid generated");
   await openMenu(page,"view","view.float");
   const nav=page.locator(".preview-panel .float-nav");
   await expect(nav).toBeVisible();
-  await expect(nav.locator("button")).toHaveCount(4);
-  await expect(nav.locator("button svg")).toHaveCount(4);
+  await expect(nav.locator("button")).toHaveCount(3);
+  await expect(nav.locator("button svg")).toHaveCount(3);
   await expect(nav).toHaveText("");
   const border=await page.locator(".preview-panel").evaluate(el=>getComputedStyle(el).borderTopWidth);
   expect(border).not.toBe("0px");
@@ -1238,7 +1238,7 @@ test("floating viewport has visible boundary and icon-only home/fit/opposite/und
   const fitCount=Number(await host.getAttribute("data-camera-fit-count"));
   await nav.locator('[data-nav="fit"]').click();
   expect(Number(await host.getAttribute("data-camera-fit-count"))).toBe(fitCount+1);
-  await nav.locator('[data-nav="underground"]').click();
+  await nav.locator('[data-nav="home"]').click();
   await expect(host).toHaveAttribute("data-home-mode","underground");
   const below=(await host.getAttribute("data-camera-direction"))!.split(",").map(Number);
   expect(below[2]).toBeLessThan(0);
@@ -1307,7 +1307,7 @@ test("multiple floating renders preserve independent cameras and optionally hidd
     .toHaveCount(2);
   await expect(page.locator(".preview-panel .solid-titlebar")).toBeVisible();
   const first=views.nth(0),second=views.nth(1);
-  await first.locator('[data-nav="underground"]').click();
+  await first.locator('[data-nav="home"]').click();
   await expect(first.locator(".floating-render-canvas")).toHaveAttribute("data-home-mode","underground");
   // The second view overlaps the first view's centre. Activating the first
   // navigation tile must foreground its canvas before pointer interactions.
@@ -1397,16 +1397,19 @@ test("independent floating canvas blocks background and preserves CAD navigation
   await expect.poll(async()=>Number(await host.getAttribute("data-camera-zoom"))).not.toBe(zoom);
   const after=(await frame.boundingBox())!;
   expect(Math.abs(after.x-original.x)+Math.abs(after.y-original.y)).toBeLessThan(2);
-  const nw=(await frame.locator('[data-corner="nw"]').boundingBox())!;
-  await page.mouse.move(nw.x+nw.width/2,nw.y+nw.height/2);
+  await expect(frame.locator(".float-corner-grip")).toHaveCount(2);
+  await expect(frame.locator('[data-corner="nw"]')).toHaveCount(0);
+  await expect(frame.locator('[data-corner="ne"]')).toHaveCount(0);
+  const sw=(await frame.locator('[data-corner="sw"]').boundingBox())!;
+  await page.mouse.move(sw.x+sw.width/2,sw.y+sw.height/2);
   await page.mouse.down();
-  await page.mouse.move(nw.x+nw.width/2-40,nw.y+nw.height/2-25,{steps:7});
+  await page.mouse.move(sw.x+sw.width/2-40,sw.y+sw.height/2+25,{steps:7});
   await page.mouse.up();
   const resized=(await frame.boundingBox())!;
   expect(resized.width).toBeGreaterThan(after.width+25);
   expect(resized.height).toBeGreaterThan(after.height+10);
   expect(Math.abs(resized.x+resized.width-after.x-after.width)).toBeLessThan(3);
-  expect(Math.abs(resized.y+resized.height-after.y-after.height)).toBeLessThan(3);
+  expect(Math.abs(resized.y-after.y)).toBeLessThan(3);
   await page.reload();
   const persisted=(await frame.boundingBox())!;
   expect(Math.abs(persisted.width-resized.width)).toBeLessThan(3);
@@ -1490,4 +1493,77 @@ test("floating view opened during provisional cut retains committed face pick",a
   const r=(await host.boundingBox())!;
   await page.mouse.click(r.x+r.width/2,r.y+r.height/2);
   await expect(page.locator("#extrude-z")).toHaveValue("8");
+});
+
+test("floating control spacing and opacity persist independently from CAD",async({page})=>{
+  await page.setViewportSize({width:1440,height:820});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await openMenu(page,"view","view.float.new");
+  const frame=page.locator(".floating-render-view").first();
+  const handle=frame.locator(".float-window-handle");
+  const nav=frame.locator(".float-nav");
+  await expect(frame.locator(".float-corner-grip")).toHaveCount(2);
+  await expect(frame.locator('[data-corner="nw"]')).toHaveCount(0);
+  await expect(frame.locator('[data-corner="ne"]')).toHaveCount(0);
+  const rect=(await frame.boundingBox())!;
+  const handleBox=(await handle.boundingBox())!,navBox=(await nav.boundingBox())!;
+  expect(handleBox.width).toBeGreaterThanOrEqual(44);
+  expect(Math.abs(handleBox.x-(rect.x+3))).toBeLessThan(2);
+  expect(Math.abs(handleBox.y-navBox.y)).toBeLessThan(1);
+  await openMenu(page,"layout","dialog.layout");
+  const slider=page.locator("#float-opacity");
+  await slider.focus();
+  await page.keyboard.press("End");
+  await page.keyboard.press("ArrowLeft");
+  await expect(slider).toHaveValue("95");
+  await expect(page.locator("#float-opacity-value")).toHaveText("95%");
+  await page.locator('[data-close="layout-dialog"]').last().click();
+  expect(await frame.evaluate(el=>getComputedStyle(el).backgroundColor)).toContain("0.95");
+  const volume=await page.locator("#status").getAttribute("data-volume-mm3");
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem("flatcad.float-opacity.v1")||"null"))).toBe(.95);
+  await page.reload();
+  await expect(frame).toBeVisible();
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  expect(await frame.evaluate(el=>getComputedStyle(el).backgroundColor)).toContain("0.95");
+  expect(await page.locator("#status").getAttribute("data-volume-mm3")).toBe(volume);
+  expect(await page.evaluate(()=>localStorage.getItem("flatcad.project.v1"))).toBeNull();
+});
+test("docked and floating Shift-wheel boost zoom without changing CAD geometry",async({page})=>{
+  await page.setViewportSize({width:1440,height:820});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const originalVolume=await page.locator("#status").getAttribute("data-volume-mm3");
+  for(const floating of [false,true]){
+    if(floating)await openMenu(page,"view","view.float.new");
+    const host=floating?page.locator(".floating-render-canvas").first():page.locator("#preview");
+    const rect=(await host.locator("canvas").boundingBox())!;
+    await page.mouse.move(rect.x+rect.width*.65,rect.y+rect.height*.6);
+    const initial=Number(await host.getAttribute("data-camera-zoom"));
+    await page.mouse.wheel(0,-120);
+    await expect.poll(async()=>Number(await host.getAttribute("data-camera-zoom"))).toBeGreaterThan(initial);
+    const standard=Number(await host.getAttribute("data-camera-zoom"));
+    await page.keyboard.down("Shift");
+    await page.mouse.wheel(0,-120);
+    await page.keyboard.up("Shift");
+    await expect.poll(async()=>Number(await host.getAttribute("data-camera-zoom"))).toBeGreaterThan(standard);
+    const boosted=Number(await host.getAttribute("data-camera-zoom"));
+    expect(boosted/standard).toBeGreaterThan(standard/initial+.005);
+  }
+  expect(await page.locator("#status").getAttribute("data-volume-mm3")).toBe(originalVolume);
+});
+test("floating context Home toggles at home, otherwise respects hemisphere",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await openMenu(page,"view","view.float");
+  const nav=page.locator(".preview-panel .float-nav");
+  const host=page.locator("#preview");
+  await nav.locator('[data-nav="home"]').click();
+  await expect(host).toHaveAttribute("data-home-mode","underground");
+  await nav.locator('[data-nav="home"]').click();
+  await expect(host).toHaveAttribute("data-home-mode","standard");
+  await nav.locator('[data-nav="opposite"]').click();
+  // Away from canonical Home, choose based on actual camera elevation.
+  await nav.locator('[data-nav="home"]').click();
+  await expect(host).toHaveAttribute("data-home-mode","standard");
 });

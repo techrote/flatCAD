@@ -1,6 +1,6 @@
 /** Shared, purely UI floating CAD frame controls. No B-rep/document changes. */
 export type FloatRect={left:number;top:number;width:number;height:number};
-export type FloatMode="move"|"nw"|"ne"|"sw"|"se";
+export type FloatMode="move"|"sw"|"se";
 export type FloatViewport={width:number;height:number};
 export const MIN_FLOAT_WIDTH=220,MIN_FLOAT_HEIGHT=180;
 const clamp=(n:number,lo:number,hi:number)=>Math.max(lo,Math.min(hi,n));
@@ -26,7 +26,6 @@ export function moveResizeFloatRect(start:FloatRect,mode:FloatMode,dx:number,dy:
   let left=start.left,top=start.top,right=start.left+start.width,bottom=start.top+start.height;
   if(mode.includes("w"))left=clamp(left+dx,0,right-wMin);
   if(mode.includes("e"))right=clamp(right+dx,left+wMin,v.width);
-  if(mode.includes("n"))top=clamp(top+dy,Math.min(65,Math.max(0,bottom-hMin)),bottom-hMin);
   if(mode.includes("s"))bottom=clamp(bottom+dy,top+hMin,v.height);
   return {left,top,width:right-left,height:bottom-top};
 }
@@ -38,7 +37,10 @@ export function installFloatingFrame(panel:HTMLElement,options:{
   function add(mode:FloatMode,title:string){
     const b=document.createElement("button");b.type="button";
     b.className=mode==="move"?"float-window-handle":"float-corner-grip";
-    b.textContent=mode==="move"?"⠿":"";
+    b.innerHTML=mode==="move"
+      ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '+
+        'stroke-width="1.75" stroke-linecap="round" aria-hidden="true">'+
+        '<path d="M4 7h16M4 12h16M4 17h16"/></svg>' : "";
     if(mode==="move")b.dataset.floatHandle="";else b.dataset.corner=mode;
     b.title=title;b.setAttribute("aria-label",title);
     panel.append(b);controls.push(b);
@@ -83,7 +85,7 @@ export function installFloatingFrame(panel:HTMLElement,options:{
     });
   }
   add("move","Move floating viewport");
-  for(const c of ["nw","ne","sw","se"] as const)
+  for(const c of ["sw","se"] as const)
     add(c,"Resize floating viewport from "+c.toUpperCase()+" corner");
   return ()=>{for(const b of controls)b.remove();};
 }

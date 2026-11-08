@@ -418,11 +418,12 @@
  * Controls remain pointer-accessible over transparent rendered pixels. */
 .workbench-layout.float-solid .preview-panel{
   border:1px solid rgba(115,166,204,.65);
+  background:rgba(11,18,32,var(--flatcad-float-opacity,0));
   border-radius:8px;
   box-shadow:0 0 0 1px rgba(7,22,36,.35),0 7px 19px #04121e50;
 }
-.float-nav{display:none;position:absolute;right:4px;top:4px;
-  z-index:40;gap:2px;padding:3px;background:#14283bc9;
+.float-nav{display:none;position:absolute;right:3px;top:3px;
+  z-index:40;gap:3px;padding:3px;background:#14283bc9;
   border:1px solid #4e7495;border-radius:7px;
   backdrop-filter:blur(5px);pointer-events:auto}
 .workbench-layout.float-solid .preview-panel .float-nav{display:flex}
@@ -447,7 +448,7 @@
 .floating-render-view{
   position:absolute;width:min(380px,48vw);height:min(340px,50vh);
   min-width:220px;min-height:180px;
-  background:transparent;border:1px solid rgba(115,166,204,.68);
+  background:rgba(11,18,32,var(--flatcad-float-opacity,0));border:1px solid rgba(115,166,204,.68);
   border-radius:8px;box-shadow:0 0 0 1px #07162450,0 7px 19px #04121e50;
   pointer-events:auto;overflow:hidden;
 }
@@ -486,26 +487,28 @@
 .layout-tile-visibility{display:flex;gap:9px;align-items:center;
   padding:12px 0 4px;color:#d2e4f5;font-size:12px}
 .layout-tile-visibility input{accent-color:#529ce8}
+.layout-float-opacity{display:flex;flex-direction:column;gap:3px;margin-top:9px;color:#d2e4f5;font-size:12px}
+.layout-float-opacity span{display:flex;justify-content:space-between;gap:9px}
+.layout-float-opacity input{width:100%;accent-color:#529ce8}
 
 /* Transparent visual appearance, opaque pointer ownership. Dedicated frame
  * controls are always over the CAD canvas, never part of the B-rep scene. */
 .float-window-handle,.float-corner-grip{position:absolute;z-index:45;
   pointer-events:auto;touch-action:none;user-select:none}
-.float-window-handle{display:none;top:5px;left:5px;width:32px;height:29px;
+.float-window-handle{display:none;top:3px;left:3px;width:46px;height:35px;
   padding:0;align-items:center;justify-content:center;
-  border:1px solid #6088ad;border-radius:4px;background:#14283bdc;
-  color:#dceefb;font:20px/1 ui-monospace,monospace;cursor:move}
+  border:1px solid #6088ad;border-radius:7px;background:#14283bdc;
+  color:#dceefb;cursor:move}
+.float-window-handle svg{width:23px;height:23px;pointer-events:none}
 .float-window-handle:hover,.float-window-handle:focus-visible{
   background:#345a78;outline:1px solid #9ecfff}
 .float-corner-grip{display:none;width:15px;height:15px;
   padding:0;border:1px solid #79a2c5;background:#1b3b57c4;
-  border-radius:2px;opacity:.65}
+  border-radius:5px;opacity:.65}
 .float-corner-grip:hover,.float-corner-grip:focus-visible{
   opacity:1;background:#5097c7}
-.float-corner-grip[data-corner="nw"]{left:0;top:0;cursor:nwse-resize}
-.float-corner-grip[data-corner="ne"]{right:0;top:0;cursor:nesw-resize}
-.float-corner-grip[data-corner="sw"]{left:0;bottom:0;cursor:nesw-resize}
-.float-corner-grip[data-corner="se"]{right:0;bottom:0;cursor:nwse-resize}
+.float-corner-grip[data-corner="sw"]{left:3px;bottom:3px;cursor:nesw-resize}
+.float-corner-grip[data-corner="se"]{right:3px;bottom:3px;cursor:nwse-resize}
 .floating-render-view .float-window-handle,
 .floating-render-view .float-corner-grip,
 .workbench-layout.float-solid .preview-panel .float-window-handle,

@@ -11,12 +11,12 @@ describe("shared floating CAD window geometry",()=>{
     expect(moveResizeFloatRect(start,"se",70,45,view))
       .toEqual({...start,width:450,height:385});
   });
-  it("resizes northwest with the right/bottom fixed",()=>{
-    expect(moveResizeFloatRect(start,"nw",-50,-30,view))
-      .toEqual({left:250,top:130,width:430,height:370});
+  it("resizes southwest with the opposite top-right corner fixed",()=>{
+    expect(moveResizeFloatRect(start,"sw",-50,30,view))
+      .toEqual({left:250,top:160,width:430,height:370});
   });
   it("clamps every resize corner and movement to viewport boundaries",()=>{
-    for(const corner of ["nw","ne","sw","se"] as const){
+    for(const corner of ["sw","se"] as const){
       for(const delta of [-2000,2000]){
         const r=moveResizeFloatRect(start,corner,delta,delta,view);
         expect(r.left).toBeGreaterThanOrEqual(0);

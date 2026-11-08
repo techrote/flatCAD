@@ -7,6 +7,7 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import {DEFAULT_RENDER_SETTINGS,effectivePixelRatio,type RenderSettings} from "./render-settings";
 import type { GeometryMesh } from "./kernel-protocol";
 import { dragAction, orbitControlsBinding, type NavigationPreset } from "./navigation";
+import {nextHomeSide} from "./home-navigation";
 import { exactFaceElevation } from "./signed-extrusion";
 import { presentationGridZ } from "./display-grid";
 import type { SurfaceTarget } from "./surface-interaction";
@@ -72,6 +73,13 @@ export class Preview {
     // Capture is necessary: OrbitControls reads the selected mouse action on
     // pointerdown. Changing it later (in a bubbling listener) is too late.
     const surface = this.renderer.domElement;
+    // Capture wheel modifiers before OrbitControls handles the event in bubble phase.
+    // Reset after the wheel; the normal unmodified zoom speed never stays boosted.
+    const normalZoomSpeed=this.orbit.zoomSpeed;
+    surface.addEventListener("wheel",event=>{
+      this.orbit.zoomSpeed=event.shiftKey?normalZoomSpeed*3:normalZoomSpeed;
+    },{capture:true,passive:true});
+    surface.addEventListener("wheel",()=>{this.orbit.zoomSpeed=normalZoomSpeed;},{passive:true});
     // Floating viewport interiors own all input, including empty pixels.
     // Window movement/resizing occurs exclusively on the separate frame grips.
     document.addEventListener("pointermove",this.onDocumentPointerMove,{capture:true});
@@ -616,6 +624,10 @@ export class Preview {
     this.bufferWidth=0;this.bufferHeight=0;
     this.resize();
     this.requestRender();
+  }
+  contextHome():void{
+    const direction=this.camera.position.clone().sub(this.orbit.target);
+    this.orientHome(nextHomeSide({x:direction.x,y:direction.y,z:direction.z})==="underground");
   }
   homeView():void{this.orientHome(false);}
   undergroundHome():void{this.orientHome(true);}
