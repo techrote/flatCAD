@@ -23,6 +23,7 @@ import { KernelClient } from "./kernel-client";
 import { Preview } from "./preview";
 import { createRenderNav } from "./render-nav";
 import {FloatRenderManager} from "./floating-views";
+import {FloatingSketchToolbar} from "./floating-toolbar";
 import {installFloatingFrame} from "./floating-frame";
 import {FLOAT_OPACITY_KEY,loadFloatOpacity,saveFloatOpacity,validateFloatOpacity} from "./floating-opacity";
 import type {GeometryMesh} from "./kernel-protocol";
@@ -353,10 +354,13 @@ const canvas=new SketchCanvas(inputCanvas(),doc,prefs,{
   onStatus:message=>status(message)
 });
 function inputCanvas():HTMLCanvasElement{return byId<HTMLCanvasElement>("sketch");}
+const floatingSketchTools=new FloatingSketchToolbar(
+  byId("sketch-tool-rail"),button("tool-dock-float"),
+  byId("sketch-wrap"),byId("tool-dock-slot"),
+  ()=>workspaceLayout.setDocked(true)
+);
 function changeToolDock(docked:boolean):void{
-  const toolbar=byId("sketch-tool-rail");
-  const destination=docked?byId("tool-dock-slot"):byId("sketch-wrap");
-  destination.append(toolbar);
+  floatingSketchTools.setDocked(docked);
   byId("workbench-layout").classList.toggle("tools-docked",docked);
   const toggle=button("tool-dock-toggle");
   toggle.setAttribute("aria-pressed",String(docked));
@@ -371,6 +375,7 @@ const workspaceLayout=new WorkspaceLayoutController(
   ()=>{
     requestAnimationFrame(positionDockCluster);
     requestAnimationFrame(positionFloatingPanel);
+    floatingSketchTools.onLayout();
   }
 );
 function positionFloatingPanel():void{
@@ -1581,7 +1586,7 @@ button("tool-dock-toggle").onclick=()=>{
   if(wasDockDrag){wasDockDrag=false;return;}
   workspaceLayout.setDocked(!workspaceLayout.docked);
 };
-button("tool-dock-float").onclick=()=>workspaceLayout.setDocked(true);
+// The floating toolbar drag grip handles click-to-anchor and drag-to-snap.
 button("timeline-now").onclick=()=>historyPanel.clearSelection();
 input("tiled-solid-visible").onchange=()=>{
   workspaceLayout.setTiledSolidVisible(input("tiled-solid-visible").checked);

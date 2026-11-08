@@ -164,7 +164,8 @@ export class FloatRenderManager{
     panel.addEventListener("focusin",()=>this.activate(entry));
     this.activate(entry,save);
     entry.disposeControls=installFloatingFrame(panel,{
-      onChange:rect=>this.setRect(entry,rect),onEnd:()=>this.persist()
+      onChange:rect=>this.setRect(entry,rect),onEnd:()=>this.persist(),
+      onActivate:()=>this.activate(entry)
     });
     preview.setSurfaceHoverHandler((target,pointer)=>this.onHover(entry,target,pointer));
     panel.append(createRenderNav(preview,()=>this.remove(descriptor.id)));

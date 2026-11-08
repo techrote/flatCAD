@@ -175,6 +175,21 @@ The Render inspector is **nonmodal**: opening it does not disable CAD drawing sh
 
 ## Tool-aware Sketch cursor and Keybinds menu
 
-Drawing tools display a tiny visual glyph offset **below and left of the native crosshair** when the pointer is in Sketch. The crosshair remains the precise input hotspot; the cue automatically flips near viewport edges and does not block pointer input or enter the saved CAD model. Line, rectangle, centre rectangle, circle, polygon, slot and extrude use the corresponding Sketch toolbar glyph. Select and Pan retain their existing native cursors.
+Drawing tools display a tiny visual glyph **orbiting the native crosshair at roughly 42px distance**, starting below-right. Moving toward it pushes it around the ring; moving away makes it chase with a brief, bounded spring-like settling motion. The precise crosshair remains unobstructed; the indicator clamps near edges and never intercepts pointer input or enters the saved CAD model. Line, rectangle, centre rectangle, circle, polygon, slot and extrude use the corresponding Sketch toolbar glyph. Select and Pan retain their existing native cursors.
 
 The new **Keybinds** top-level dropdown lists current keyboard shortcuts for every configured action; clicking one opens the same validated shortcut editor in recording mode. **View / reassign all…** opens the complete editor, also available from Settings → Keyboard shortcuts or **K**. Reassignments, clear/reset and JSON import/export still use the single existing `flatcad.preferences.v1` preference store, not the CAD document.
+
+### Floating Sketch toolbar drag, side-snapping and overlap priority
+
+The undocked Sketch rail can be moved by its own top drag grip. Dragging the rail
+near the **left or right Sketch viewport edge** magnetically snaps it into a
+vertical edge position; dragging away frees it again. The selected position
+and side are UI-only preferences, preserved separately from the CAD project.
+Clicking the toolbar grip without dragging still anchors the rail in the Sketch
+titlebar. The drag grip also supports keyboard arrow movement (Shift for 1px).
+The original draggable titlebar anchor remains available.
+
+For overlapping windows, Sketch toolbar **tool buttons** are above floating
+render windows, floating **render move bars** are above those tool buttons,
+and the Sketch toolbar's **drag grip** is above both. This ordering is
+intentional and never changes camera or sketch geometry.
