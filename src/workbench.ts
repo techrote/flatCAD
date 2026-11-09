@@ -24,6 +24,7 @@ import { Preview } from "./preview";
 import { createRenderNav } from "./render-nav";
 import {FloatRenderManager} from "./floating-views";
 import {installFloatingFrame} from "./floating-frame";
+import {FLOAT_OPACITY_KEY,loadFloatOpacity,saveFloatOpacity,validateFloatOpacity} from "./floating-opacity";
 import type {GeometryMesh} from "./kernel-protocol";
 import {loadRenderSettings,saveRenderSettings,validateRenderSettings,
   DEFAULT_RENDER_SETTINGS,RENDER_SETTINGS_KEY,type RenderSettings} from "./render-settings";
@@ -160,7 +161,8 @@ root.innerHTML=[
   '<dialog id="layout-dialog" class="settings-dialog"><div class="dialog-head"><div><strong>Workspace tiles</strong><small>Rearrange the existing controls without changing CAD data</small></div><button data-close="layout-dialog">×</button></div>',
   '  <div class="dialog-scroll"><label class="field"><span>Desktop layout</span><select id="tile-mode"><option value="split">Sketch + Solid with inspector below</option><option value="columns">Three adjustable columns</option><option value="float">Float — movable, resizable Solid viewport</option></select></label>',
   '  <div id="tile-order" class="tile-order" aria-label="Tile arrangement"></div>',
-  '  <label class="layout-tile-visibility"><input id="tiled-solid-visible" type="checkbox" checked> Show tiled Solid viewport</label></div>',
+  '  <label class="layout-tile-visibility"><input id="tiled-solid-visible" type="checkbox" checked> Show tiled Solid viewport</label>',
+  '  <label class="layout-float-opacity"><span>Floating-window background opacity <output id="float-opacity-value">0%</output></span><input id="float-opacity" type="range" min="0" max="100" step="5" value="0" aria-label="Floating-window background opacity"></label></div>',
   '  <footer><button id="tile-reset" class="button">Reset workspace</button><button data-close="layout-dialog" class="button primary">Done</button></footer></dialog>',
   '<dialog id="render-dialog" class="settings-dialog"><div class="dialog-head"><div><strong>Render</strong><small>Presentation only · exact CAD geometry unchanged</small></div><button data-close="render-dialog">×</button></div>',
   '  <div class="dialog-scroll"><label class="check render-effect-option"><input id="render-ao" type="checkbox"> Ambient occlusion (SSAO)</label>',
@@ -204,6 +206,14 @@ function initialDocument():CadDocument{
 let doc=initialDocument();
 let prefs=loadPreferences();
 let renderSettings=loadRenderSettings();
+let floatOpacity=loadFloatOpacity();
+function applyFloatOpacity(value:number):void{
+  floatOpacity=validateFloatOpacity(value);
+  document.documentElement.style.setProperty("--flatcad-float-opacity",String(floatOpacity));
+  input("float-opacity").value=String(Math.round(floatOpacity*100));
+  byId("float-opacity-value").textContent=Math.round(floatOpacity*100)+"%";
+}
+applyFloatOpacity(floatOpacity);
 let history:CadDocument[]=[doc],historyIndex=0;
 let selectedId:string|null=null,selectedIds:string[]=[],activeTool:SketchTool="select";
 let activeMenu:string|null=null;
@@ -1333,6 +1343,7 @@ function showLayoutSettings():void{
   closeMenu();
   select("tile-mode").value=workspaceLayout.tileMode;
   input("tiled-solid-visible").checked=workspaceLayout.tiledSolidVisible;
+  applyFloatOpacity(floatOpacity);
   renderLayoutTileOrder();
   dialog("layout-dialog").showModal();
 }
@@ -1475,6 +1486,12 @@ button("tool-dock-float").onclick=()=>workspaceLayout.setDocked(true);
 button("timeline-now").onclick=()=>historyPanel.clearSelection();
 input("tiled-solid-visible").onchange=()=>{
   workspaceLayout.setTiledSolidVisible(input("tiled-solid-visible").checked);
+};
+input("float-opacity").oninput=()=>{
+  try{
+    applyFloatOpacity(Number(input("float-opacity").value)/100);
+    saveFloatOpacity(floatOpacity);
+  }catch(error){status("Floating-window opacity invalid: "+String(error),true);}
 };
 select("tile-mode").onchange=()=>{
   workspaceLayout.setTileMode(select("tile-mode").value as "split"|"columns"|"float");
@@ -1622,6 +1639,7 @@ document.addEventListener("keyup",event=>{
   if(event.code==="Space"&&priorTool){setTool(priorTool);priorTool=null;}
 });
 window.addEventListener("storage",event=>{
+  if(event.key===FLOAT_OPACITY_KEY)applyFloatOpacity(loadFloatOpacity());
   if(event.key===RENDER_SETTINGS_KEY){
     renderSettings=loadRenderSettings();
     preview?.setRenderSettings(renderSettings);

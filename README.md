@@ -34,7 +34,7 @@ Use the rectangle or circle tools to draw profiles, select a profile, and choose
 
 **Face-driven dimensions:** While Extrude/Cut is active, focus **Start Z** or **Depth**, then click a *horizontal* face of the existing solid. Start Z becomes that face's Z elevation; Depth becomes face Z minus Start Z, so Start Z 8 and a face at Z 2 produces **−6 mm**. The face picker targets committed geometry even while optional operation preview is shown. Opposite-direction extrusion also works by typing a negative Depth directly.
 
-**CAD mouse controls:** Under Settings → CAD navigation controls choose Fusion (default: MMB pan, Shift+MMB orbit), SOLIDWORKS, Onshape or Blender. The selection persists in settings JSON; mouse wheel zoom remains available.
+**CAD mouse controls:** Under Settings → CAD navigation controls choose Fusion (default: MMB pan, Shift+MMB orbit), SOLIDWORKS, Onshape or Blender. The selection persists in settings JSON; mouse-wheel zoom remains available, and **Shift+wheel accelerates Solid zoom 3×** in both docked and floating cameras.
 
 ## Direct workflow
 
@@ -56,7 +56,7 @@ Geometric constraint solving, standalone arcs, automatic region extraction from 
 
 ## Experimental UI: floating Solid and wheel fields
 
-The View and Layout menus provide a floating Solid mode plus up to three independent floating CAD cameras. The floating window is visually transparent but **the whole rectangular viewport blocks interaction with the Sketch beneath it**, including empty pixels. Its camera uses exactly the same configured CAD mouse controls as the docked Solid (Fusion: middle-button pan, Shift+middle-button orbit, wheel zoom); left-click horizontal faces can still populate a focused Z/Depth field. **Drag the small rectangular top-left handle to move a floating viewport**, not the rendered object. Drag any of its four corner grips to resize. Frame positions and sizes are stored in UI preferences independently of the CAD document and restored after reload. Dock Solid restores the conventional tile. Numeric properties can be adjusted by hovering and scrolling (Shift for fine, Ctrl for coarse steps). Clicking a timeline Cut briefly displays its exact translucent cutter for 867 ms.
+The View and Layout menus provide a floating Solid mode plus up to three independent floating CAD cameras. The floating window is visually transparent but **the whole rectangular viewport blocks interaction with the Sketch beneath it**, including empty pixels. Its camera uses exactly the same configured CAD mouse controls as the docked Solid (Fusion: middle-button pan, Shift+middle-button orbit, wheel zoom); left-click horizontal faces can still populate a focused Z/Depth field. **Drag the small rectangular top-left handle to move a floating viewport**, not the rendered object. Drag its bottom-left or bottom-right grip to resize (the upper corners remain clear of the toolbar). Its single Home control resets to the current camera hemisphere, then toggles to the opposite hemisphere when clicked again from a Home pose. Layout → Workspace tiles provides a floating-window background opacity slider; opacity does not change pointer blocking or CAD geometry. Frame positions, sizes and opacity are stored in UI preferences independently of the CAD document and restored after reload. Dock Solid restores the conventional tile. Numeric properties can be adjusted by hovering and scrolling (Shift for fine, Ctrl for coarse steps). Clicking a timeline Cut briefly displays its exact translucent cutter for 867 ms.
 
 ## Documents
 
