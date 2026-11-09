@@ -418,7 +418,7 @@
  * Controls remain pointer-accessible over transparent rendered pixels. */
 .workbench-layout.float-solid .preview-panel{
   border:1px solid rgba(115,166,204,.65);
-  background:rgba(11,18,32,var(--flatcad-float-opacity,0));
+  background:rgba(11,18,32,var(--flatcad-float-opacity,.2));
   border-radius:8px;
   box-shadow:0 0 0 1px rgba(7,22,36,.35),0 7px 19px #04121e50;
 }
@@ -448,7 +448,7 @@
 .floating-render-view{
   position:absolute;width:min(380px,48vw);height:min(340px,50vh);
   min-width:220px;min-height:180px;
-  background:rgba(11,18,32,var(--flatcad-float-opacity,0));border:1px solid rgba(115,166,204,.68);
+  background:rgba(11,18,32,var(--flatcad-float-opacity,.2));border:1px solid rgba(115,166,204,.68);
   border-radius:8px;box-shadow:0 0 0 1px #07162450,0 7px 19px #04121e50;
   pointer-events:auto;overflow:hidden;
 }
@@ -546,3 +546,15 @@
     width:min(370px,calc(100vw - 12px));max-height:calc(100vh - 70px)}
   #render-dialog .dialog-scroll{max-height:calc(100vh - 170px)}
 }
+
+/* Unqualified AO stays in a secondary diagnostics drawer, not normal controls. */
+#render-dialog .render-advanced{
+  padding:6px 8px;border:1px solid #314b64;border-radius:6px;
+  background:#112339;display:block;
+}
+#render-dialog .render-advanced summary{
+  cursor:pointer;font-size:11px;color:#a8c6de;
+  padding:3px 0;list-style:disclosure-closed;
+}
+#render-dialog .render-advanced[open] summary{margin-bottom:8px}
+#render-dialog .render-advanced .navigation-hint{display:block;margin-top:8px}

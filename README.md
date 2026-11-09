@@ -56,7 +56,7 @@ Geometric constraint solving, standalone arcs, automatic region extraction from 
 
 ## Experimental UI: floating Solid and wheel fields
 
-The View and Layout menus provide a floating Solid mode plus up to three independent floating CAD cameras. The floating window is visually transparent but **the whole rectangular viewport blocks interaction with the Sketch beneath it**, including empty pixels. Its camera uses exactly the same configured CAD mouse controls as the docked Solid (Fusion: middle-button pan, Shift+middle-button orbit, wheel zoom); left-click horizontal faces can still populate a focused Z/Depth field. **Drag the small rectangular top-left handle to move a floating viewport**, not the rendered object. Drag its bottom-left or bottom-right grip to resize (the upper corners remain clear of the toolbar). Its single Home control resets to the current camera hemisphere, then toggles to the opposite hemisphere when clicked again from a Home pose. Layout → Workspace tiles provides a floating-window background opacity slider; opacity does not change pointer blocking or CAD geometry. Frame positions, sizes and opacity are stored in UI preferences independently of the CAD document and restored after reload. Dock Solid restores the conventional tile. Numeric properties can be adjusted by hovering and scrolling (Shift for fine, Ctrl for coarse steps). Clicking a timeline Cut briefly displays its exact translucent cutter for 867 ms.
+The View and Layout menus provide a floating Solid mode plus up to three independent floating CAD cameras. The floating window has a subtly translucent 20% dark background by default (adjustable from 0% to 100% in Layout → Workspace tiles) but **the whole rectangular viewport blocks interaction with the Sketch beneath it**, including empty pixels. Its camera uses exactly the same configured CAD mouse controls as the docked Solid (Fusion: middle-button pan, Shift+middle-button orbit, wheel zoom); left-click horizontal faces can still populate a focused Z/Depth field. **Drag the small rectangular top-left handle to move a floating viewport**, not the rendered object. Drag its bottom-left or bottom-right grip to resize (the upper corners remain clear of the toolbar). Its single Home control resets to the current camera hemisphere, then toggles to the opposite hemisphere when clicked again from a Home pose. Layout → Workspace tiles provides a floating-window background opacity slider; opacity does not change pointer blocking or CAD geometry. Frame positions, sizes and opacity are stored in UI preferences independently of the CAD document and restored after reload. Dock Solid restores the conventional tile. Numeric properties can be adjusted by hovering and scrolling (Shift for fine, Ctrl for coarse steps). Clicking a timeline Cut briefly displays its exact translucent cutter for 867 ms.
 
 ## Documents
 
@@ -137,3 +137,38 @@ light 0.75 and key directional light 5. It is a selectable preference, not
 a change to the physically accepted historical defaults. Neither settings
 nor presets are part of the CAD document or change STEP output.
 See [ADR-0011](docs/ADR-0011-AA-CONTROLS.md).
+
+
+## CAD lines and AO depth repair (experimental)
+
+The Render inspector's CAD edges section now defaults to **Lines on, 1 CSS px,
+pure black, 100% opacity**, drawn using the same screen-space line material at
+every resolution. There is no separate native/screen/hidden presentation mode
+dropdown: uncheck **Lines** to hide presentation edges, or adjust the one
+width slider directly. The optional historical **Clean CAD** preset still
+restores its separate 0.5px/50% visual experiment. Existing v1 preferences
+migrate from their old edge modes without discarding user-set widths/colours.
+
+The default **SSAO remains off**. Three.js's SSAO shader operates on normalized
+depth values; the old raw `minDistance=.005` excluded any occlusion closer
+than about 500mm for the current orthographic camera. The experimental AO
+path now derives its depth thresholds in millimetres from the camera range,
+making smaller fillets/recesses eligible for actual occlusion. The
+offscreen colour and transparency match to browser-default rendering is
+tracked separately with screenshot-based A/B tests (no CAD document changes).
+See [ADR-0012](docs/ADR-0012-RENDER-PARITY-AO-LINES.md).
+
+
+**AO qualification:** The old SSAO thresholds were ineffective on
+millimetre-scale parts, and a controlled AO on/off screenshot test
+still shows no measurable occlusion after correcting them. AO therefore
+remains disabled by default, behind the collapsed *Experimental AO
+diagnostics* section rather than in the main render controls. The
+offscreen MSAA compositor now uses a parity-calibrated background
+clear colour, matching the original direct dark backdrop in the
+Chromium A/B test; matching transparency on floating views remains a
+separate acceptance check.
+
+### Rendering inspector and sketch shortcuts
+
+The Render inspector is **nonmodal**: opening it does not disable CAD drawing shortcuts, undo/redo, the shortcut editor or temporary Space-to-pan when keyboard focus is in the CAD workspace. Keyboard shortcuts for drawing/tools stay active even when focus remains on the Render inspector's non-text controls (for example, its Close button or line-width slider). Native range-adjustment arrows, Space/Enter activation, and text/dropdown editing retain their normal browser behavior. Modal dialogs such as Keyboard shortcuts and Grid still suppress global CAD shortcuts. The floating-window background is subtly darkened at **20% opacity for new installations**; existing user-selected opacity, including 0% fully transparent, is preserved.

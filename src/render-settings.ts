@@ -6,23 +6,22 @@ export const RENDER_PIXEL_BUDGETS=[8_000_000,16_000_000,32_000_000,64_000_000] a
 export type RenderPixelBudget=typeof RENDER_PIXEL_BUDGETS[number];
 export type MsaaSamples="browser"|0|2|4|8;
 export type DownsampleMode="browser"|"nearest";
-export type EdgeMode="native"|"screen"|"hidden";
 export type RenderSettings={
   version:1;ambientOcclusion:boolean;supersampling:Supersampling;
-  edgeMode:EdgeMode;edgeWidthPx:number;edgeOpacity:number;edgeColor:string;
+  linesEnabled:boolean;edgeWidthPx:number;edgeOpacity:number;edgeColor:string;
   ambientLight:number;keyLight:number;aoRadius:number;
   msaaSamples:MsaaSamples;renderPixelBudget:RenderPixelBudget;
   downsampleMode:DownsampleMode;
 };
 export const DEFAULT_RENDER_SETTINGS:RenderSettings={
   version:1,ambientOcclusion:false,supersampling:1,
-  edgeMode:"native",edgeWidthPx:1.5,edgeOpacity:1,edgeColor:"#152a45",
+  linesEnabled:true,edgeWidthPx:1,edgeOpacity:1,edgeColor:"#000000",
   ambientLight:2,keyLight:3,aoRadius:8,
   msaaSamples:"browser",renderPixelBudget:8_000_000,downsampleMode:"browser"
 };
 export const CLEAN_CAD_RENDER_SETTINGS:RenderSettings={
   ...DEFAULT_RENDER_SETTINGS,ambientOcclusion:false,supersampling:1,
-  edgeMode:"screen",edgeWidthPx:.5,edgeOpacity:.5,
+  linesEnabled:true,edgeWidthPx:.5,edgeOpacity:.5,
   ambientLight:.75,keyLight:5
 };
 const finiteRange=(v:unknown,min:number,max:number):v is number=>
@@ -34,7 +33,13 @@ export function validateRenderSettings(value:unknown):RenderSettings{
   if(s.version!==1||typeof s.ambientOcclusion!=="boolean"||
     !SUPER_SAMPLING.includes(s.supersampling as Supersampling))
     throw Error("Invalid AO/supersampling configuration");
-  const edgeMode=fallback(s.edgeMode,d.edgeMode);
+  // Old render.v1 documents had native / screen / hidden presentation modes.
+  // Convert them to the single screen-width line renderer and visibility toggle.
+  // Never lose an explicit user choice to hide lines during migration.
+  const legacyMode=s.edgeMode;
+  if(legacyMode!==undefined&&!["native","screen","hidden"].includes(legacyMode as string))
+    throw Error("Invalid legacy edge mode");
+  const linesEnabled=fallback(s.linesEnabled,legacyMode==="hidden"?false:d.linesEnabled);
   const edgeWidthPx=fallback(s.edgeWidthPx,d.edgeWidthPx);
   const edgeOpacity=fallback(s.edgeOpacity,d.edgeOpacity);
   const edgeColor=fallback(s.edgeColor,d.edgeColor);
@@ -44,7 +49,7 @@ export function validateRenderSettings(value:unknown):RenderSettings{
   const msaaSamples=fallback(s.msaaSamples,d.msaaSamples);
   const renderPixelBudget=fallback(s.renderPixelBudget,d.renderPixelBudget);
   const downsampleMode=fallback(s.downsampleMode,d.downsampleMode);
-  if((edgeMode!=="native"&&edgeMode!=="screen"&&edgeMode!=="hidden")||
+  if(typeof linesEnabled!=="boolean"||
     !finiteRange(edgeWidthPx,.5,5)||!finiteRange(edgeOpacity,0,1)||
     typeof edgeColor!=="string"||!/^#[0-9a-fA-F]{6}$/.test(edgeColor)||
     !finiteRange(ambientLight,0,4)||!finiteRange(keyLight,0,5)||
@@ -54,7 +59,7 @@ export function validateRenderSettings(value:unknown):RenderSettings{
     (downsampleMode!=="browser"&&downsampleMode!=="nearest"))
     throw Error("Invalid render diagnostic parameter");
   return {version:1,ambientOcclusion:s.ambientOcclusion,
-    supersampling:s.supersampling as Supersampling,edgeMode,edgeWidthPx,edgeOpacity,
+    supersampling:s.supersampling as Supersampling,linesEnabled,edgeWidthPx,edgeOpacity,
     edgeColor,ambientLight,keyLight,aoRadius,msaaSamples:msaaSamples as MsaaSamples,
     renderPixelBudget:renderPixelBudget as RenderPixelBudget,
     downsampleMode:downsampleMode as DownsampleMode};

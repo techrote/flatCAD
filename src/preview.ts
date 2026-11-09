@@ -11,6 +11,7 @@ import {DEFAULT_RENDER_SETTINGS,effectivePixelRatio,effectiveMsaaSamples,type Re
 import type { GeometryMesh } from "./kernel-protocol";
 import { dragAction, orbitControlsBinding, type NavigationPreset } from "./navigation";
 import {nextHomeSide} from "./home-navigation";
+import {normalizedAoDepthThresholds} from "./ssao-depth";
 import { exactFaceElevation } from "./signed-extrusion";
 import { presentationGridZ } from "./display-grid";
 import type { SurfaceTarget } from "./surface-interaction";
@@ -52,6 +53,7 @@ export class Preview {
   private disposed=false;
   private renderCount=0;
   private composer:EffectComposer|null=null;
+  private scenePass:RenderPass|null=null;
   private ssaoPass:SSAOPass|null=null;
   private pipelineKey="direct";
   private appliedPixelRatio=0;
@@ -191,6 +193,7 @@ export class Preview {
     this.referenceGrid.visible=!enabled;
     this.axesHelper.visible=!enabled;
     this.renderer.setClearColor(0x0b1220,enabled?0:1);
+    if(this.scenePass)this.scenePass.clearAlpha=enabled?0:1;
     this.renderer.domElement.style.pointerEvents="auto";
     if(enabled)this.container.dataset.floatHitPolicy="viewport";
     else delete this.container.dataset.floatHitPolicy;
@@ -467,30 +470,21 @@ export class Preview {
     return geometry;
   }
 
-  /** Display-only edges: native raster pixels vs genuine screen-space CSS width.
-   *  The kernel's B-rep geometry and native CAD project are never modified.
+  /** All normal CAD lines use a single screen-space CSS-pixel renderer.
+   * One visibility checkbox replaces the native/screen/hidden mode selector.
+   * Exact B-rep geometry and its display triangulation are unchanged.
    */
   private makeEdgeObject(lines:number[]):THREE.Object3D|null{
-    if(!lines.length||this.renderSettings.edgeMode==="hidden")return null;
+    if(!lines.length||!this.renderSettings.linesEnabled)return null;
     const settings=this.renderSettings;
-    let edge:THREE.Object3D;
-    if(settings.edgeMode==="screen"){
-      const geometry=new LineSegmentsGeometry();
-      geometry.setPositions(lines);
-      const material=new LineMaterial({
-        color:settings.edgeColor,linewidth:settings.edgeWidthPx,
-        worldUnits:false,transparent:settings.edgeOpacity<1,
-        opacity:settings.edgeOpacity,depthTest:true
-      });
-      edge=new LineSegments2(geometry,material);
-    }else{
-      const geometry=new THREE.BufferGeometry();
-      geometry.setAttribute("position",new THREE.Float32BufferAttribute(lines,3));
-      edge=new THREE.LineSegments(geometry,new THREE.LineBasicMaterial({
-        color:settings.edgeColor,transparent:settings.edgeOpacity<1,
-        opacity:settings.edgeOpacity,depthTest:true
-      }));
-    }
+    const geometry=new LineSegmentsGeometry();
+    geometry.setPositions(lines);
+    const material=new LineMaterial({
+      color:settings.edgeColor,linewidth:settings.edgeWidthPx,
+      worldUnits:false,transparent:settings.edgeOpacity<1,
+      opacity:settings.edgeOpacity,depthTest:true
+    });
+    const edge=new LineSegments2(geometry,material);
     edge.name="flatcad-presentation-edges";
     return edge;
   }
@@ -505,9 +499,7 @@ export class Preview {
     if(!this.object||!this.currentEdgeLines)return;
     const previous=this.object.getObjectByName("flatcad-presentation-edges");
     const settings=this.renderSettings;
-    const sameMode=previous&&settings.edgeMode!=="hidden"&&(
-      (settings.edgeMode==="screen"&&previous instanceof LineSegments2)||
-      (settings.edgeMode==="native"&&previous instanceof THREE.LineSegments));
+    const sameMode=previous&&settings.linesEnabled&&previous instanceof LineSegments2;
     // Sliders modify existing GPU materials: avoid reallocating geometry per
     // pointermove, especially with multiple floating WebGL contexts.
     if(sameMode){
@@ -669,6 +661,7 @@ export class Preview {
     this.ssaoPass?.dispose();
     this.composer?.dispose();
     this.ssaoPass=null;
+    this.scenePass=null;
     this.composer=null;
   }
   private createComposer(samples:number,aoEnabled:boolean,ratio:number,width:number,height:number):void{
@@ -676,12 +669,26 @@ export class Preview {
       type:THREE.HalfFloatType,depthBuffer:true,samples
     });
     const composer=new EffectComposer(this.renderer,target);
-    composer.addPass(new RenderPass(this.scene,this.camera));
+    // Direct WebGL canvas clearing and offscreen OutputPass do not apply
+    // exactly the same transfer function to the clear colour. The original
+    // direct #0b1220 must remain authoritative; prelinearize only the
+    // composer clear so OutputPass displays the matching background.
+    // All lit mesh surfaces retain their original shader colour pipeline.
+    const parityClear=new THREE.Color(0x0b1220).convertSRGBToLinear();
+    const scenePass=new RenderPass(this.scene,this.camera,null,
+      parityClear,this.floating?0:1);
+    this.scenePass=scenePass;
+    composer.addPass(scenePass);
     if(aoEnabled){
       const ao=new SSAOPass(this.scene,this.camera,Math.max(1,width),Math.max(1,height),8);
       ao.kernelRadius=this.renderSettings.aoRadius;
-      ao.minDistance=.005;
-      ao.maxDistance=.12;
+      // SSAOShader compares normalized orthographic depth differences.
+      // The original .005 threshold corresponded to ~500 mm for this
+      // camera and suppressed all normal small-part contact occlusion.
+      const depth=normalizedAoDepthThresholds(this.camera.near,
+        this.camera.far,this.renderSettings.aoRadius);
+      ao.minDistance=depth.minDistance;
+      ao.maxDistance=depth.maxDistance;
       composer.addPass(ao);
       this.ssaoPass=ao;
     }
@@ -715,7 +722,17 @@ export class Preview {
       if(wantsComposer)this.createComposer(targetSamples,s.ambientOcclusion,ratio,width,height);
       this.bufferWidth=0;
     }else if(ratioChanged)this.composer?.setPixelRatio(ratio);
-    if(this.ssaoPass)this.ssaoPass.kernelRadius=s.aoRadius;
+    if(this.ssaoPass){
+      this.ssaoPass.kernelRadius=s.aoRadius;
+      const depth=normalizedAoDepthThresholds(this.camera.near,this.camera.far,s.aoRadius);
+      this.ssaoPass.minDistance=depth.minDistance;
+      this.ssaoPass.maxDistance=depth.maxDistance;
+      this.container.dataset.aoDepthMin=String(depth.minDistance);
+      this.container.dataset.aoDepthMax=String(depth.maxDistance);
+    }else{
+      delete this.container.dataset.aoDepthMin;
+      delete this.container.dataset.aoDepthMax;
+    }
     this.renderer.domElement.style.imageRendering=s.downsampleMode==="nearest"?"pixelated":"auto";
     this.container.dataset.pixelRatio=String(ratio);
     this.container.dataset.supersample=String(s.supersampling);
@@ -738,7 +755,7 @@ export class Preview {
     this.ambientLight.intensity=settings.ambientLight;
     this.keyLight.intensity=settings.keyLight;
     this.updateEdgePresentation();
-    this.container.dataset.edgeMode=settings.edgeMode;
+    this.container.dataset.linesEnabled=String(settings.linesEnabled);
     this.container.dataset.edgeWidth=String(settings.edgeWidthPx);
     this.container.dataset.edgeOpacity=String(settings.edgeOpacity);
     this.container.dataset.ambientLight=String(settings.ambientLight);

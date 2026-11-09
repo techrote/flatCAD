@@ -6,6 +6,11 @@ async function openMenu(page:import("@playwright/test").Page,name:string,action:
   await page.locator('[data-menu="'+name+'"]').click();
   await page.locator('[data-command="'+action+'"]').click();
 }
+async function openAoDiagnostics(page:import("@playwright/test").Page){
+  const details=page.locator("#render-ao-diagnostics");
+  if(!(await details.evaluate(el=>(el as HTMLDetailsElement).open)))
+    await details.locator("summary").click();
+}
 async function newProject(page:import("@playwright/test").Page){
   await openMenu(page,"file","file.new");
   await expect(page.locator("#profile-count")).toHaveText("0 profiles");
@@ -1100,9 +1105,10 @@ test("floating Solid blocks sketch input and uses handle move and corner resize"
   await expect(solid).toHaveAttribute("data-float-hit-policy","viewport");
   await expect(canvas).toHaveCSS("pointer-events","auto");
   const start=(await panel.boundingBox())!;
-  // Transparent backgrounds may serialize with any RGB channels; only alpha is contractual.
+  // Fresh floating frames now have a subtle 20% background by default.
+  // Explicitly saved zero remains completely transparent (covered separately).
   expect(await panel.evaluate(el=>getComputedStyle(el).backgroundColor))
-    .toMatch(/,\s*0\)$/);
+    .toBe("rgba(11, 18, 32, 0.2)");
   const empty=[start.x+start.width*.12,start.y+start.height*.78];
   const hit=await page.evaluate(([x,y])=>document.elementFromPoint(x,y)?.tagName,empty);
   expect(hit).toBe("CANVAS");
@@ -1281,6 +1287,7 @@ test("View/Layout/Render menu separation and optional AO/SSAA preserve source ge
   await openMenu(page,"render","dialog.render");
   const settings=page.locator("#render-dialog");
   await expect(settings).toBeVisible();
+  await openAoDiagnostics(page);
   await page.locator("#render-ao").check();
   await expect(page.locator("#preview")).toHaveAttribute("data-ao-enabled","true");
   await page.locator("#render-supersampling").selectOption("1.5");
@@ -1449,6 +1456,7 @@ test("independent floating views share render settings but not exact CAD geometr
   const host=page.locator("#floating-views-layer .floating-render-canvas").first();
   const originalVolume=await page.locator("#status").getAttribute("data-volume-mm3");
   await openMenu(page,"render","dialog.render");
+  await openAoDiagnostics(page);
   await page.locator("#render-ao").check();
   await page.locator("#render-supersampling").selectOption("1.5");
   await expect(host).toHaveAttribute("data-ao-enabled","true");
@@ -1582,14 +1590,16 @@ test("nonmodal render inspector tunes real edge lines and lighting without chang
   await openMenu(page,"render","dialog.render");
   const inspector=page.locator("#render-dialog");
   await expect(inspector).toBeVisible();
+  await expect(page.locator("#render-ao-diagnostics")).toHaveJSProperty("open",false);
   expect(await inspector.evaluate(el=>(el as HTMLDialogElement).matches(":modal"))).toBe(false);
   await expect(page.locator("#render-resolution-info")).toContainText("browser smooth or nearest canvas scaling");
-  await page.locator("#render-edge-mode").selectOption("hidden");
-  await expect(page.locator("#preview")).toHaveAttribute("data-edge-mode","hidden");
-  await expect(floatHost).toHaveAttribute("data-edge-mode","hidden");
+  await page.locator("#render-lines-enabled").uncheck();
+  await expect(page.locator("#preview")).toHaveAttribute("data-lines-enabled","false");
+  await expect(floatHost).toHaveAttribute("data-lines-enabled","false");
   const hidden=await surface.screenshot();
   expect(Buffer.compare(initial,hidden)).not.toBe(0);
-  await page.locator("#render-edge-mode").selectOption("screen");
+  await page.locator("#render-lines-enabled").check();
+  await expect(page.locator("#preview")).toHaveAttribute("data-lines-enabled","true");
   await expect(page.locator("#render-edge-width")).toBeEnabled();
   await page.locator("#render-edge-width").focus();
   await page.keyboard.press("End");
@@ -1602,6 +1612,7 @@ test("nonmodal render inspector tunes real edge lines and lighting without chang
   await expect(page.locator("#preview")).toHaveAttribute("data-ambient-light","0");
   const dark=await surface.screenshot();
   expect(Buffer.compare(wide,dark)).not.toBe(0);
+  await openAoDiagnostics(page);
   await page.locator("#render-ao").check();
   await expect(page.locator("#render-ao-radius")).toBeEnabled();
   await page.locator("#render-ao-radius").focus();
@@ -1615,7 +1626,7 @@ test("nonmodal render inspector tunes real edge lines and lighting without chang
   expect(await page.evaluate(()=>localStorage.getItem("flatcad.project.v1"))).toBeNull();
   await page.reload();
   await expect(page.locator("#status")).toContainText("Exact solid generated");
-  await expect(page.locator("#preview")).toHaveAttribute("data-edge-mode","screen");
+  await expect(page.locator("#preview")).toHaveAttribute("data-lines-enabled","true");
   await expect(page.locator("#preview")).toHaveAttribute("data-edge-width","5");
   await expect(page.locator("#preview")).toHaveAttribute("data-supersample","1.75");
   expect(await page.locator("#status").getAttribute("data-volume-mm3")).toBe(initialVolume);
@@ -1631,9 +1642,11 @@ test("MSAA sample count is independent of AO and has truthful GPU limits",async(
   const solid=page.locator("#preview");
   await expect(solid).toHaveAttribute("data-msaa-requested","browser");
   await expect(solid).toHaveAttribute("data-msaa-effective","browser");
+  await openAoDiagnostics(page);
   await page.locator("#render-ao").check();
   await expect(solid).toHaveAttribute("data-msaa-effective","0");
   await expect(page.locator("#render-resolution-info")).toContainText("AO composer bypasses");
+  await openAoDiagnostics(page);
   await page.locator("#render-ao").uncheck();
   await page.locator("#render-msaa").selectOption("4");
   await expect(solid).toHaveAttribute("data-msaa-requested","4");
@@ -1641,11 +1654,13 @@ test("MSAA sample count is independent of AO and has truthful GPU limits",async(
   await expect.poll(async()=>Number(await solid.getAttribute("data-msaa-effective")))
     .toBeGreaterThanOrEqual(0);
   expect([0,2,4]).toContain(Number(await solid.getAttribute("data-msaa-effective")));
+  await openAoDiagnostics(page);
   await page.locator("#render-ao").check();
   await expect(solid).toHaveAttribute("data-ao-enabled","true");
   expect([0,2,4]).toContain(Number(await solid.getAttribute("data-msaa-effective")));
   await page.locator("#render-msaa").selectOption("0");
   await expect(solid).toHaveAttribute("data-msaa-effective","0");
+  await openAoDiagnostics(page);
   await page.locator("#render-ao").uncheck();
   await expect(solid).toHaveAttribute("data-msaa-path","offscreen");
   await page.locator("#render-msaa").selectOption("browser");
@@ -1694,7 +1709,7 @@ test("Clean CAD preset is reproducible and CAD-project-independent",async({page}
   const p=page.locator("#preview");
   await expect(p).toHaveAttribute("data-ao-enabled","false");
   await expect(p).toHaveAttribute("data-msaa-requested","browser");
-  await expect(p).toHaveAttribute("data-edge-mode","screen");
+  await expect(p).toHaveAttribute("data-lines-enabled","true");
   await expect(p).toHaveAttribute("data-edge-width","0.5");
   await expect(p).toHaveAttribute("data-edge-opacity","0.5");
   await expect(p).toHaveAttribute("data-ambient-light","0.75");
@@ -1707,4 +1722,353 @@ test("Clean CAD preset is reproducible and CAD-project-independent",async({page}
   await expect(page.locator("#preview")).toHaveAttribute("data-ambient-light","0.75");
   expect(await page.locator("#status").getAttribute("data-volume-mm3")).toBe(volume);
   expect(await page.evaluate(()=>localStorage.getItem("flatcad.project.v1"))).toBeNull();
+});
+
+
+/** Decode Chrome's own screenshot through a 2D browser canvas. This captures
+ * the composited output and is unaffected by preserveDrawingBuffer=false.
+ * It does not read any engineering geometry or source model data. */
+async function renderPixelComparison(page:import("@playwright/test").Page,
+  source:Buffer,target:Buffer){
+  return page.evaluate(async ([a,b]:string[])=>{
+    const imgs=await Promise.all([a,b].map(async encoded=>{
+      const img=new Image();img.src="data:image/png;base64,"+encoded;await img.decode();
+      const c=document.createElement("canvas");c.width=img.width;c.height=img.height;
+      const ctx=c.getContext("2d",{willReadFrequently:true})!;
+      ctx.drawImage(img,0,0);
+      return {width:img.width,height:img.height,
+        data:ctx.getImageData(0,0,img.width,img.height).data};
+    }));
+    const [one,two]=imgs;
+    if(one.width!==two.width||one.height!==two.height)
+      throw Error("Mismatched screenshot dimensions");
+    let all=0,model=0,back=0,allCount=0,modelCount=0,backCount=0;
+    let significant=0;
+    let stableBackdrop=0,stableFace=0,stableBackdropCount=0,stableFaceCount=0;
+    // Identify flat, interior pixels from the DIRECT reference image,
+    // eroding by two pixels to exclude edge MSAA coverage differences.
+    const interior=(x:number,y:number,check:(r:number,g:number,b:number)=>boolean)=>{
+      for(const [dx,dy] of [[0,0],[-2,0],[2,0],[0,-2],[0,2],[-2,-2],[-2,2],[2,-2],[2,2]]){
+        const j=((y+dy)*one.width+x+dx)*4;
+        if(!check(one.data[j],one.data[j+1],one.data[j+2]))return false;
+      }
+      return true;
+    };
+    for(let y=0;y<one.height;y+=2){
+      for(let x=0;x<one.width;x+=2){
+        const i=(y*one.width+x)*4;
+        const r=one.data[i],g=one.data[i+1],b=one.data[i+2];
+        const diff=(Math.abs(r-two.data[i])+Math.abs(g-two.data[i+1])+
+          Math.abs(b-two.data[i+2]))/3;
+        all+=diff;allCount++;
+        if(b>70&&b>r+18&&b>g+12){model+=diff;modelCount++;if(diff>5)significant++;}
+        if(r<40&&g<55&&b<85){back+=diff;backCount++;}
+        if(x>=4&&y>=4&&x+4<one.width&&y+4<one.height){
+          // Exact original dark background (RGB 11/18/32) is the contract.
+          // Sampling deep inside its uniform area excludes jagged edge pixels.
+          if(interior(x,y,(rr,gg,bb)=>Math.abs(rr-11)<=1&&
+            Math.abs(gg-18)<=1&&Math.abs(bb-32)<=1)){
+            stableBackdrop+=diff;stableBackdropCount++;
+          }
+          if(b>70&&b>r+18&&b>g+12&&
+            interior(x,y,(rr,gg,bb)=>
+              Math.abs(rr-r)<=2&&Math.abs(gg-g)<=2&&Math.abs(bb-b)<=2)){
+            stableFace+=diff;stableFaceCount++;
+          }
+        }
+      }
+    }
+    const rgb=(d:Uint8ClampedArray,x:number,y:number)=>
+      Array.from(d.slice((y*one.width+x)*4,(y*one.width+x)*4+4));
+    return {
+      fullMeanAbs:all/Math.max(1,allCount),
+      modelMeanAbs:model/Math.max(1,modelCount),
+      modelChangedOver5Pct:100*significant/Math.max(1,modelCount),
+      backgroundMeanAbs:back/Math.max(1,backCount),
+      flatBackdropMeanAbs:stableBackdrop/Math.max(1,stableBackdropCount),
+      flatFaceMeanAbs:stableFace/Math.max(1,stableFaceCount),
+      flatBackdropPixels:stableBackdropCount,flatFacePixels:stableFaceCount,
+      backgroundDirect:rgb(one.data,4,4),
+      backgroundCompared:rgb(two.data,4,4),
+      modelPixels:modelCount,backgroundPixels:backCount,width:one.width,height:one.height
+    };
+  },[source.toString("base64"),target.toString("base64")]);
+}
+test("direct/offscreen colour parity and measurable AO on identical MSAA path",async({page},testInfo)=>{
+  await page.setViewportSize({width:1600,height:900});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const volume=await page.locator("#status").getAttribute("data-volume-mm3");
+  await openMenu(page,"render","dialog.render");
+  const inspector=page.locator("#render-dialog");
+  const canvas=page.locator("#preview canvas");
+  const snap=async(name:string)=>{
+    await inspector.evaluate(el=>(el as HTMLElement).style.visibility="hidden");
+    await page.waitForTimeout(80);
+    const bytes=await canvas.screenshot({path:testInfo.outputPath("render-"+name+".png")});
+    await inspector.evaluate(el=>(el as HTMLElement).style.visibility="visible");
+    return bytes;
+  };
+  await openAoDiagnostics(page);
+  await page.locator("#render-ao").uncheck();
+  await page.locator("#render-supersampling").selectOption("1");
+  await page.locator("#render-msaa").selectOption("browser");
+  await expect(page.locator("#preview")).toHaveAttribute("data-msaa-path","browser");
+  const direct=await snap("direct-default");
+  await page.locator("#render-msaa").selectOption("0");
+  const offscreen0=await snap("offscreen-0msaa");
+  await page.locator("#render-msaa").selectOption("4");
+  await expect(page.locator("#preview")).toHaveAttribute("data-msaa-path","offscreen");
+  const offscreen4=await snap("offscreen-4msaa");
+  await openAoDiagnostics(page);
+  await page.locator("#render-ao").check();
+  await expect(page.locator("#preview")).toHaveAttribute("data-ao-enabled","true");
+  await expect.poll(async()=>Number(await page.locator("#preview").getAttribute("data-ao-depth-max")))
+    .toBeGreaterThan(0);
+  const aoEnabled=await snap("ao-on-4msaa");
+  const depthRange=[await page.locator("#preview").getAttribute("data-ao-depth-min"),
+    await page.locator("#preview").getAttribute("data-ao-depth-max")];
+  await openAoDiagnostics(page);
+  await page.locator("#render-ao").uncheck();
+  const aoRestored=await snap("ao-off-4msaa");
+  await page.locator("#render-msaa").selectOption("browser");
+  const restored=await snap("restored-direct");
+  const report={
+    defaultVsOffscreen0:await renderPixelComparison(page,direct,offscreen0),
+    defaultVsOffscreen4:await renderPixelComparison(page,direct,offscreen4),
+    aoOffVsOn:await renderPixelComparison(page,offscreen4,aoEnabled),
+    aoRestoration:await renderPixelComparison(page,offscreen4,aoRestored),
+    directRestoration:await renderPixelComparison(page,direct,restored),
+    depthRange
+  };
+  console.log("FLATCAD_RENDER_PARITY_EVIDENCE "+JSON.stringify(report));
+  // Keep diagnostic first, enforce quantitative parity after evidence review.
+  expect(report.defaultVsOffscreen4.modelPixels).toBeGreaterThan(100);
+  expect(report.defaultVsOffscreen4.backgroundPixels).toBeGreaterThan(100);
+  expect(report.aoOffVsOn.modelPixels).toBeGreaterThan(100);
+  // Enforce colour parity on stable, interior pixels and exact background
+  // RGBA, not full-image averages contaminated by normal MSAA edge changes.
+  const parity=report.defaultVsOffscreen4;
+  expect(parity.backgroundCompared).toEqual(parity.backgroundDirect);
+  expect(parity.backgroundDirect).toEqual([11,18,32,255]);
+  expect(parity.flatBackdropPixels).toBeGreaterThan(1000);
+  expect(parity.flatBackdropMeanAbs).toBeLessThan(1);
+  expect(parity.flatFacePixels).toBeGreaterThan(100);
+  expect(parity.flatFaceMeanAbs).toBeLessThan(2);
+  // Full-image/edge measurements are still recorded for comparisons.
+  expect(report.directRestoration.fullMeanAbs).toBeLessThan(.2);
+  expect(Number(report.depthRange[0])).toBeGreaterThan(0);
+  expect(Number(report.depthRange[1])).toBeGreaterThan(Number(report.depthRange[0]));
+  expect(await page.locator("#status").getAttribute("data-volume-mm3")).toBe(volume);
+  expect(await page.evaluate(()=>localStorage.getItem("flatcad.project.v1"))).toBeNull();
+});
+test("new CAD line defaults are one black CSS pixel and a single checkbox",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await openMenu(page,"render","dialog.render");
+  await expect(page.locator("#render-lines-enabled")).toBeChecked();
+  await expect(page.locator("#render-edge-mode")).toHaveCount(0);
+  await expect(page.locator("#preview")).toHaveAttribute("data-lines-enabled","true");
+  await expect(page.locator("#preview")).toHaveAttribute("data-edge-width","1");
+  await expect(page.locator("#render-edge-color")).toHaveValue("#000000");
+  await page.locator("#render-lines-enabled").uncheck();
+  await expect(page.locator("#preview")).toHaveAttribute("data-lines-enabled","false");
+  await expect(page.locator("#render-edge-width")).toBeDisabled();
+  await page.locator("#render-lines-enabled").check();
+  await expect(page.locator("#render-edge-width")).toBeEnabled();
+  await page.locator('[data-close="render-dialog"]').last().click();
+  await page.reload();
+  await expect(page.locator("#preview")).toHaveAttribute("data-lines-enabled","true");
+});
+
+
+test("Render inspector exposes MSAA controls outside collapsed AO diagnostics in every layout",async({page})=>{
+  await page.setViewportSize({width:1440,height:820});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const inspector=page.locator("#render-dialog");
+  const inspect=async()=>{
+    await openMenu(page,"render","dialog.render");
+    await expect(inspector).toBeVisible();
+    await expect(inspector).toHaveAttribute("open","");
+    await expect(page.locator("#render-ao-diagnostics")).toHaveJSProperty("open",false);
+    await expect(page.locator("#render-ao")).toBeHidden();
+    for(const id of ["render-msaa","render-supersampling","render-pixel-budget",
+      "render-downsample","render-clean-preset"]){
+      await expect(page.locator("#"+id)).toBeVisible();
+    }
+  };
+  await inspect();
+  await page.locator("#render-msaa").selectOption("4");
+  await expect(page.locator("#preview")).toHaveAttribute("data-msaa-requested","4");
+  await page.locator('[data-close="render-dialog"]').last().click();
+  await openMenu(page,"view","view.float");
+  await inspect();
+  await page.locator("#render-msaa").selectOption("2");
+  await expect(page.locator("#preview")).toHaveAttribute("data-msaa-requested","2");
+  await page.locator('[data-close="render-dialog"]').last().click();
+  await openMenu(page,"view","view.dock");
+  await inspect();
+  await page.locator("#render-msaa").selectOption("browser");
+  await expect(page.locator("#preview")).toHaveAttribute("data-msaa-path","browser");
+  await page.locator('[data-close="render-dialog"]').last().click();
+  await openMenu(page,"view","view.float.new");
+  await openMenu(page,"view","view.solid.hide");
+  await inspect();
+  await page.locator("#render-pixel-budget").selectOption("16000000");
+  await expect(page.locator(".floating-render-canvas").first())
+    .toHaveAttribute("data-render-pixel-budget","16000000");
+  await page.locator('[data-close="render-dialog"]').last().click();
+});
+test("floating WebGL background remains transparent in direct and offscreen MSAA",async({page},testInfo)=>{
+  await page.setViewportSize({width:1440,height:820});
+  // The user-adjustable window background now defaults to 20% opacity.
+  // Test the explicit fully transparent setting for pixel-accurate alpha parity.
+  await page.addInitScript(()=>localStorage.setItem("flatcad.float-opacity.v1","0"));
+  await page.goto("/");
+  await newProject(page);
+  await openMenu(page,"view","view.float");
+  const viewport=page.locator(".preview-panel");
+  await expect(viewport).toBeVisible();
+  const canvas=page.locator("#preview canvas");
+  const box=(await canvas.boundingBox())!;
+  const clip={x:Math.round(box.x+box.width/2-20),
+    y:Math.round(box.y+box.height/2-20),width:40,height:40};
+  // With an empty model and floating frame opacity=0, the WebGL background
+  // must reveal the same sketch pixels as a temporarily hidden canvas.
+  await canvas.evaluate(el=>(el as HTMLElement).style.visibility="hidden");
+  const underlying=await page.screenshot({clip,path:testInfo.outputPath("float-hidden-canvas.png")});
+  await canvas.evaluate(el=>(el as HTMLElement).style.visibility="visible");
+  await page.waitForTimeout(70);
+  const direct=await page.screenshot({clip,path:testInfo.outputPath("float-direct-transparent.png")});
+  // Change MSAA with the Solid docked, then restore exactly the same
+  // transparent floating layout. The float-mode Render-inspector accessibility
+  // issue is tracked independently; do not mix that with alpha acceptance.
+  await openMenu(page,"view","view.dock");
+  await openMenu(page,"render","dialog.render");
+  await expect(page.locator("#render-dialog")).toBeVisible();
+  await page.locator("#render-msaa").selectOption("4");
+  await page.locator('[data-close="render-dialog"]').last().click();
+  await openMenu(page,"view","view.float");
+  await expect(page.locator("#preview")).toHaveAttribute("data-msaa-path","offscreen");
+  const floated=(await canvas.boundingBox())!;
+  const clipOffscreen={x:Math.round(floated.x+floated.width/2-20),
+    y:Math.round(floated.y+floated.height/2-20),width:40,height:40};
+  await canvas.evaluate(el=>(el as HTMLElement).style.visibility="hidden");
+  const underlyingOffscreen=await page.screenshot({
+    clip:clipOffscreen,path:testInfo.outputPath("float-offscreen-underlay.png")});
+  await canvas.evaluate(el=>(el as HTMLElement).style.visibility="visible");
+  await page.waitForTimeout(70);
+  const offscreen=await page.screenshot({
+    clip:clipOffscreen,path:testInfo.outputPath("float-offscreen-transparent.png")});
+  const result={
+    direct:await renderPixelComparison(page,underlying,direct),
+    offscreen:await renderPixelComparison(page,underlyingOffscreen,offscreen)
+  };
+  console.log("FLATCAD_FLOAT_ALPHA_EVIDENCE "+JSON.stringify(result));
+  expect(result.direct.fullMeanAbs).toBeLessThan(3);
+  expect(result.offscreen.fullMeanAbs).toBeLessThan(3);
+});
+
+test("nonmodal Render inspector does not disable CAD shortcuts, Space pan, or modal guards",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await openMenu(page,"render","dialog.render");
+  await expect(page.locator("#render-dialog")).toBeVisible();
+  // Reproduce physical user behavior: the nonmodal dialog may autofocus its
+  // first button. Do not click Sketch to artificially repair document focus.
+  await page.locator('#render-dialog [data-close="render-dialog"]').first().focus();
+  await page.keyboard.press("r");
+  await expect(page.locator('[data-tool="rectangle"]')).toHaveClass(/active/);
+  // Nonmodal HTMLDialogElement.show() and pointer-adjusted range inputs
+  // retain focus in the panel. Letter shortcuts MUST still work there.
+  await page.locator("#render-edge-width").focus();
+  await page.keyboard.press("c");
+  await expect(page.locator('[data-tool="circle"]')).toHaveClass(/active/);
+  const before=await page.locator("#render-edge-width").inputValue();
+  await page.keyboard.press("ArrowRight");
+  expect(await page.locator("#render-edge-width").inputValue()).not.toBe(before);
+  await expect(page.locator('[data-tool="circle"]')).toHaveClass(/active/);
+  await page.locator("#render-reset").focus();
+  await page.keyboard.press("r");
+  await expect(page.locator('[data-tool="rectangle"]')).toHaveClass(/active/);
+  await page.locator("#render-msaa").focus();
+  await page.keyboard.press("c");
+  await expect(page.locator('[data-tool="rectangle"]')).toHaveClass(/active/);
+  // Outside the nonmodal inspector, temporary Space-pan must still operate.
+  await page.locator(".sketch-titlebar").click();
+  await page.keyboard.down("Space");
+  await expect(page.locator('[data-tool="pan"]')).toHaveClass(/active/);
+  await page.keyboard.up("Space");
+  await expect(page.locator('[data-tool="rectangle"]')).toHaveClass(/active/);
+  await page.keyboard.press("g");
+  await expect(page.locator("#grid-dialog")).toBeVisible();
+  // A real modal dialog must suppress sketch shortcuts.
+  await page.keyboard.press("c");
+  await expect(page.locator('[data-tool="rectangle"]')).toHaveClass(/active/);
+  await page.locator('[data-close="grid-dialog"]').last().click();
+  await page.locator(".sketch-titlebar").click();
+  await page.keyboard.press("c");
+  await expect(page.locator('[data-tool="circle"]')).toHaveClass(/active/);
+  await expect(page.locator("#render-dialog")).toBeVisible();
+  await page.locator('[data-close="render-dialog"]').last().click();
+  await page.keyboard.press("r");
+  await expect(page.locator('[data-tool="rectangle"]')).toHaveClass(/active/);
+});
+test("new floating-window backgrounds use subtle opacity without overriding user 0%",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await expect(page.locator("#float-opacity")).toHaveValue("20");
+  await expect(page.locator("#float-opacity-value")).toHaveText("20%");
+  await openMenu(page,"view","view.float.new");
+  const frame=page.locator(".floating-render-view").first();
+  await expect(frame).toBeVisible();
+  expect(await frame.evaluate(el=>getComputedStyle(el).backgroundColor))
+    .toMatch(/rgba\(11, 18, 32, 0\.2\)/);
+  await page.evaluate(()=>localStorage.setItem("flatcad.float-opacity.v1","0"));
+  await page.reload();
+  await expect(frame).toBeVisible();
+  await expect(page.locator("#float-opacity")).toHaveValue("0");
+  expect(await frame.evaluate(el=>getComputedStyle(el).backgroundColor))
+    .toMatch(/rgba\(11, 18, 32, 0\)/);
+});
+
+test("nonmodal Render keyboard focus keeps CAD shortcuts live without a sketch click",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await openMenu(page,"render","dialog.render");
+  const inspector=page.locator("#render-dialog");
+  await expect(inspector).toBeVisible();
+  const tool=async(which:string)=>expect(page.locator('[data-tool="'+which+'"]')).toHaveClass(/active/);
+  // Real UI workflow: open settings, use a control, then press tool shortcuts
+  // without an intervening click on the CAD canvas or titlebar.
+  await inspector.locator('[data-close="render-dialog"]').first().focus();
+  await page.keyboard.press("r");
+  await tool("rectangle");
+  await page.locator("#render-edge-width").focus();
+  await page.keyboard.press("c");
+  await tool("circle");
+  await page.keyboard.press("l");
+  await tool("line");
+  // Native keyboard editing inside a range must not steal its arrows.
+  const before=await page.locator("#render-edge-width").inputValue();
+  await page.keyboard.press("ArrowRight");
+  expect(await page.locator("#render-edge-width").inputValue()).not.toBe(before);
+  await tool("line");
+  // Editable dropdown remains native; letter keys must NOT change CAD tools.
+  await page.locator("#render-msaa").focus();
+  await page.keyboard.press("r");
+  await tool("line");
+  await page.locator("#render-clean-preset").focus();
+  await page.keyboard.press("v");
+  await tool("select");
+  await page.keyboard.press("g");
+  await expect(page.locator("#grid-dialog")).toBeVisible();
+  await page.locator('[data-close="grid-dialog"]').last().click();
+  await page.locator("#render-edge-width").focus();
+  await page.keyboard.press("r");
+  await tool("rectangle");
+  await inspector.locator('[data-close="render-dialog"]').last().click();
+  await page.keyboard.press("c");
+  await tool("circle");
 });

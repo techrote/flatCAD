@@ -163,22 +163,24 @@ root.innerHTML=[
   '  <div class="dialog-scroll"><label class="field"><span>Desktop layout</span><select id="tile-mode"><option value="split">Sketch + Solid with inspector below</option><option value="columns">Three adjustable columns</option><option value="float">Float — movable, resizable Solid viewport</option></select></label>',
   '  <div id="tile-order" class="tile-order" aria-label="Tile arrangement"></div>',
   '  <label class="layout-tile-visibility"><input id="tiled-solid-visible" type="checkbox" checked> Show tiled Solid viewport</label>',
-  '  <label class="layout-float-opacity"><span>Floating-window background opacity <output id="float-opacity-value">0%</output></span><input id="float-opacity" type="range" min="0" max="100" step="5" value="0" aria-label="Floating-window background opacity"></label></div>',
+  '  <label class="layout-float-opacity"><span>Floating-window background opacity <output id="float-opacity-value">20%</output></span><input id="float-opacity" type="range" min="0" max="100" step="5" value="20" aria-label="Floating-window background opacity"></label></div>',
   '  <footer><button id="tile-reset" class="button">Reset workspace</button><button data-close="layout-dialog" class="button primary">Done</button></footer></dialog>',
   '<dialog id="render-dialog" class="settings-dialog render-inspector"><div class="dialog-head"><div><strong>Render inspector</strong><small>Live display tuning · native CAD remains unchanged</small></div><button data-close="render-dialog" aria-label="Close render inspector">×</button></div>',
-  '  <div class="dialog-scroll"><fieldset class="render-group"><legend>Antialiasing & occlusion</legend>',
-  '    <label class="check render-effect-option"><input id="render-ao" type="checkbox"> Ambient occlusion (SSAO)</label>',
+  '  <div class="dialog-scroll"><fieldset class="render-group"><legend>Antialiasing</legend>',
+  '    <details id="render-ao-diagnostics" class="render-advanced"><summary>Experimental AO diagnostics (not yet qualified)</summary>',
+  '    <label class="check render-effect-option"><input id="render-ao" type="checkbox"> Enable SSAO test</label>',
+  '    <label class="render-knob"><span>AO sampling radius <output id="render-ao-radius-value">8</output></span><input id="render-ao-radius" type="range" min="0" max="24" step="1" value="8"></label>',
+  '    <small class="navigation-hint">Diagnostic only: AO has not shown measurable model occlusion in current automated screenshots. Off by default.</small></details>',
   '    <label class="field"><span>MSAA samples (independent of AO)</span><select id="render-msaa"><option value="browser">Browser default</option><option value="0">Off (0 samples)</option><option value="2">2 samples</option><option value="4">4 samples</option><option value="8">8 samples</option></select></label>',
   '    <label class="field"><span>Requested SSAA resolution</span><select id="render-supersampling"><option value="1">Native (1×)</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="1.75">1.75×</option><option value="2">2×</option><option value="2.5">2.5×</option><option value="3">3×</option><option value="4">4×</option><option value="8">8× (experimental)</option></select></label>',
   '    <label class="field"><span>Max framebuffer pixels per view</span><select id="render-pixel-budget"><option value="8000000">8M · safe default</option><option value="16000000">16M</option><option value="32000000">32M · experimental</option><option value="64000000">64M · experimental</option></select></label>',
   '    <label class="field"><span>Canvas downsampling</span><select id="render-downsample"><option value="browser">Browser smoothing (default)</option><option value="nearest">Nearest / pixelated (diagnostic)</option></select></label>',
-  '    <label class="render-knob"><span>AO sampling radius <output id="render-ao-radius-value">8</output></span><input id="render-ao-radius" type="range" min="0" max="24" step="1" value="8"></label>',
   '    <small id="render-resolution-info" class="navigation-hint" aria-live="polite">Resolution and MSAA limits shown here.</small>',
   '  </fieldset><fieldset class="render-group"><legend>CAD edges</legend>',
-  '    <label class="field"><span>Presentation</span><select id="render-edge-mode"><option value="native">Native 1 rendering pixel</option><option value="screen">Fixed screen-space width</option><option value="hidden">No edge lines</option></select></label>',
-  '    <label class="render-knob"><span>Screen-space line width <output id="render-edge-width-value">1.5 px</output></span><input id="render-edge-width" type="range" min="0.5" max="5" step="0.25" value="1.5"></label>',
-  '    <label class="render-knob"><span>Edge opacity <output id="render-edge-opacity-value">100%</output></span><input id="render-edge-opacity" type="range" min="0" max="1" step="0.05" value="1"></label>',
-  '    <label class="render-colour">Edge colour <input id="render-edge-color" type="color" value="#152a45"></label>',
+  '    <label class="check render-effect-option"><input id="render-lines-enabled" type="checkbox" checked> Lines</label>',
+  '    <label class="render-knob"><span>Line width (CSS px) <output id="render-edge-width-value">1.00 px</output></span><input id="render-edge-width" type="range" min="0.5" max="5" step="0.25" value="1"></label>',
+  '    <label class="render-knob"><span>Line opacity <output id="render-edge-opacity-value">100%</output></span><input id="render-edge-opacity" type="range" min="0" max="1" step="0.05" value="1"></label>',
+  '    <label class="render-colour">Line colour <input id="render-edge-color" type="color" value="#000000"></label>',
   '  </fieldset><fieldset class="render-group"><legend>Lighting</legend>',
   '    <label class="render-knob"><span>Ambient light <output id="render-light-ambient-value">2.0</output></span><input id="render-light-ambient" type="range" min="0" max="4" step="0.25" value="2"></label>',
   '    <label class="render-knob"><span>Directional key <output id="render-light-key-value">3.0</output></span><input id="render-light-key" type="range" min="0" max="5" step="0.25" value="3"></label>',
@@ -1373,15 +1375,16 @@ function syncRenderInspector():void{
   select("render-msaa").value=String(s.msaaSamples);
   select("render-pixel-budget").value=String(s.renderPixelBudget);
   select("render-downsample").value=s.downsampleMode;
-  select("render-edge-mode").value=s.edgeMode;
+  input("render-lines-enabled").checked=s.linesEnabled;
   input("render-edge-width").value=String(s.edgeWidthPx);
   input("render-edge-opacity").value=String(s.edgeOpacity);
   input("render-edge-color").value=s.edgeColor;
   input("render-light-ambient").value=String(s.ambientLight);
   input("render-light-key").value=String(s.keyLight);
   input("render-ao-radius").value=String(s.aoRadius);
-  input("render-edge-width").disabled=s.edgeMode!=="screen";
-  input("render-edge-opacity").disabled=s.edgeMode==="hidden";
+  input("render-edge-width").disabled=!s.linesEnabled;
+  input("render-edge-opacity").disabled=!s.linesEnabled;
+  input("render-edge-color").disabled=!s.linesEnabled;
   input("render-ao-radius").disabled=!s.ambientOcclusion;
   byId("render-edge-width-value").textContent=s.edgeWidthPx.toFixed(2)+" px";
   byId("render-edge-opacity-value").textContent=Math.round(s.edgeOpacity*100)+"%";
@@ -1403,8 +1406,10 @@ function showRenderSettings():void{
   closeMenu();
   syncRenderInspector();
   const panel=dialog("render-dialog");
-  // Nonmodal: controls can be adjusted while the CAD view remains undimmed.
+  // AO experiments are intentionally collapsed, but primary MSAA/SSAA controls
+  // must remain outside that disclosure in every layout mode.
   if(!panel.open)panel.show();
+  panel.dataset.layoutAtOpen=workspaceLayout.tileMode;
 }
 function showLayoutSettings():void{
   closeMenu();
@@ -1582,8 +1587,8 @@ select("render-downsample").onchange=()=>applyRenderSettings({
   ...renderSettings,downsampleMode:
     select("render-downsample").value as RenderSettings["downsampleMode"]
 });
-select("render-edge-mode").onchange=()=>applyRenderSettings({
-  ...renderSettings,edgeMode:select("render-edge-mode").value as RenderSettings["edgeMode"]
+input("render-lines-enabled").onchange=()=>applyRenderSettings({
+  ...renderSettings,linesEnabled:input("render-lines-enabled").checked
 });
 for(const [id,field] of [
   ["render-edge-width","edgeWidthPx"],["render-edge-opacity","edgeOpacity"],
@@ -1685,6 +1690,38 @@ button("grid-reset").onclick=()=>{
 button("settings-export").onclick=exportSettings;
 button("settings-import").onclick=()=>input("settings-input").click();
 
+const MODAL_SHORTCUT_BLOCKERS=[
+  "shortcuts-dialog","grid-dialog","navigation-dialog",
+  "text-dialog","layout-dialog","parameters-dialog"
+] as const;
+/** Preserve the browser's native editing/keyboard controls without allowing
+ * nonmodal inspector focus to disable every CAD shortcut. Browser show()
+ * normally focuses a button inside the dialog, and range inputs keep focus
+ * after pointer drags. Neither should own unmodified R/C/E/G tool chords.
+ */
+function nativeInputOwnsKey(event:KeyboardEvent):boolean{
+  const target=event.target;
+  if(!(target instanceof Element))return false;
+  if(target.closest('textarea,select,[contenteditable]:not([contenteditable="false"]),[role="textbox"]'))
+    return true;
+  const input=target.closest("input");
+  if(input){
+    const type=(input.getAttribute("type")||"text").toLowerCase();
+    if(!["range","checkbox","radio","color"].includes(type))return true;
+    // Sliders, toggles and colour pickers retain their native keyboard
+    // navigation, activation and adjustment keys.
+    return ["Space","Enter","Home","End","PageUp","PageDown"].includes(event.code)||
+      event.code.startsWith("Arrow");
+  }
+  // Space/Enter activate focusable controls, even in the nonmodal inspector.
+  if((event.code==="Space"||event.code==="Enter")&&
+    target.closest("button,summary,[role='button']"))return true;
+  return false;
+}
+function canvasShortcutsBlocked(event:KeyboardEvent):boolean{
+  return MODAL_SHORTCUT_BLOCKERS.some(id=>dialog(id).open)||
+    nativeInputOwnsKey(event);
+}
 document.addEventListener("keydown",event=>{
   if(shortcutRecording){
     event.preventDefault();event.stopPropagation();
@@ -1697,18 +1734,24 @@ document.addEventListener("keydown",event=>{
     }catch(error){byId("shortcut-error").textContent=String(error);}
     return;
   }
-  if(["shortcuts-dialog","grid-dialog","navigation-dialog","text-dialog","layout-dialog","parameters-dialog","render-dialog"].some(x=>dialog(x).open))return;
-  if(!byId("extrude-flyout").hidden){
+  if(MODAL_SHORTCUT_BLOCKERS.some(id=>dialog(id).open))return;
+  const inRenderInspector=event.target instanceof Element &&
+    Boolean(event.target.closest("#render-dialog"));
+  // Contextual CAD Enter/Escape must take priority when an extrusion numeric
+  // field has focus. These existing tool controls deliberately use Enter to
+  // commit. Do not apply those contextual actions to keys in Render controls.
+  if(!inRenderInspector&&!byId("extrude-flyout").hidden){
     if(event.code==="Escape"){event.preventDefault();closeExtrude();setTool("select");return;}
     if(event.code==="Enter"){event.preventDefault();applyExtrude();return;}
   }
-  if(activeTool==="line"){
+  if(!inRenderInspector&&activeTool==="line"){
     if(event.code==="Escape"){event.preventDefault();canvas.cancelLine();return;}
     if(event.code==="Enter"){event.preventDefault();canvas.finishLine(false);return;}
     if(event.code==="Backspace"){event.preventDefault();canvas.removeLastLinePoint();return;}
   }
-  const target=event.target as HTMLElement;
-  if(target.closest("input,textarea,select,[contenteditable]"))return;
+  if(nativeInputOwnsKey(event))return;
+  // Non-text inspector controls can retain focus after using the Render
+  // panel; nativeInputOwnsKey has already protected their adjustment keys.
   let chord=chordFromEvent(event);
   // Ctrl/Command shortcuts map to one user-facing preference unless rebound.
   if(event.metaKey&&!event.ctrlKey)chord=chord.replace("Meta+","Control+");
@@ -1722,8 +1765,7 @@ document.addEventListener("keydown",event=>{
   }
 });
 document.addEventListener("keydown",event=>{
-  if(event.code==="Space"&&!event.repeat&&!(event.target as HTMLElement).closest("input,textarea,select")&&
-    !["shortcuts-dialog","grid-dialog","navigation-dialog","text-dialog","layout-dialog","parameters-dialog","render-dialog"].some(x=>dialog(x).open)){
+  if(event.code==="Space"&&!event.repeat&&!canvasShortcutsBlocked(event)){
     if(activeTool!=="pan"){event.preventDefault();priorTool=activeTool;setTool("pan");}
   }
 });
