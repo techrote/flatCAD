@@ -42,3 +42,19 @@ describe("rearrangeable UI tiles and legacy layout migration",()=>{
     expect(()=>validateLayout({...DEFAULT_LAYOUT,dockX:2})).toThrow("arrangement");
   });
 });
+
+describe("floating CAD view settings",()=>{
+  it("migrates legacy workspace positions to nonintrusive float defaults",()=>{
+    const legacy={version:1,main:.56,solid:.54,docked:false};
+    const result=validateLayout(legacy);
+    expect(result.floatX).toBeGreaterThanOrEqual(0);
+    expect(result.floatY).toBeGreaterThanOrEqual(0);
+    expect(result.tileMode).toBe("split");
+  });
+  it("persists an in-bounds floating mode without changing CAD geometry",()=>{
+    expect(validateLayout({...DEFAULT_LAYOUT,tileMode:"float",floatX:0,floatY:1}).tileMode)
+      .toBe("float");
+    expect(()=>validateLayout({...DEFAULT_LAYOUT,floatX:-.1})).toThrow();
+    expect(()=>validateLayout({...DEFAULT_LAYOUT,tileMode:"nonsense"})).toThrow();
+  });
+});

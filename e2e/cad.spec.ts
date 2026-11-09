@@ -1088,3 +1088,100 @@ test("portrait history retains newest-first even after switching out of timeline
   expect(await portrait.locator(".history-feature-name").allTextContents())
     .toEqual(["Cut · Circle 2","Cut · Circle 1","Extrude · Rectangle 1"]);
 });
+
+test("floating solid has transparent background, hit-based navigation, and draggable persisted position",async({page})=>{
+  await page.setViewportSize({width:1440,height:820});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await openMenu(page,"view","view.float");
+  const workbench=page.locator("#workbench-layout");
+  const solid=page.locator("#preview");
+  await expect(workbench).toHaveClass(/float-solid/);
+  await expect(solid).toHaveAttribute("data-floating","true");
+  const panel=page.locator(".preview-panel"),canvas=page.locator("#preview canvas");
+  const initial=await panel.boundingBox();
+  expect(initial).not.toBeNull();
+  expect(await panel.evaluate(el=>getComputedStyle(el).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
+  // Transparent corners are pass-through, not an invisible OrbitControls window.
+  await page.mouse.move(initial!.x+2,initial!.y+2);
+  await expect(solid).toHaveAttribute("data-float-hover","false");
+  await expect(canvas).toHaveCSS("pointer-events","none");
+  const cx=initial!.x+initial!.width/2,cy=initial!.y+initial!.height/2;
+  await page.mouse.move(cx,cy);
+  await expect(solid).toHaveAttribute("data-float-hover","true");
+  const before=await solid.getAttribute("data-camera-direction");
+  await page.mouse.down();
+  await page.mouse.move(cx+80,cy+45,{steps:7});
+  await page.mouse.up();
+  const moved=await panel.boundingBox();
+  expect(moved!.x).toBeGreaterThan(initial!.x+60);
+  expect(moved!.y).toBeGreaterThan(initial!.y+30);
+  expect(await solid.getAttribute("data-camera-direction")).toBe(before);
+  const layout=await page.evaluate(()=>JSON.parse(localStorage.getItem("flatcad.layout.v1")!));
+  expect(layout.tileMode).toBe("float");
+  expect(layout.floatX).toBeGreaterThan(.58);
+  await page.reload();
+  await expect(workbench).toHaveClass(/float-solid/);
+  const persisted=await panel.boundingBox();
+  expect(persisted!.x).toBeCloseTo(moved!.x,0);
+  await openMenu(page,"view","view.dock");
+  await expect(workbench).not.toHaveClass(/float-solid/);
+  await expect(solid).toHaveAttribute("data-floating","false");
+  await expect(page.locator(".preview-panel .solid-titlebar")).toBeVisible();
+});
+
+test("clicking history Cut briefly displays its exact translucent cutter for 867ms",async({page})=>{
+  await page.setViewportSize({width:1440,height:820});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const history=page.locator("#history-timeline");
+  await expect(history.locator(".history-tile[data-thumbnail-state=ready]"))
+    .toHaveCount(3,{timeout:120000});
+  await history.locator(".history-tile[data-operation=cut]").first().click();
+  await expect(page.locator("#preview")).toHaveAttribute("data-history-cut-overlay","true");
+  await expect(page.locator("#preview")).toHaveAttribute("data-cut-tool-visible","true");
+  await page.waitForTimeout(950);
+  await expect(page.locator("#preview")).not.toHaveAttribute("data-history-cut-overlay",/.+/);
+  await expect(page.locator("#preview")).not.toHaveAttribute("data-cut-tool-visible",/.+/);
+  await history.locator(".history-tile[data-operation=cut]").last().click();
+  await expect(page.locator("#preview")).toHaveAttribute("data-history-cut-overlay","true");
+  await page.locator("#timeline-now").click();
+  await expect(page.locator("#preview")).not.toHaveAttribute("data-history-cut-overlay",/.+/);
+});
+
+test("anchor remains stationary during docking and does not conceal rail buttons",async({page})=>{
+  await page.setViewportSize({width:1440,height:820});
+  await page.goto("/");
+  const anchor=page.locator("#tool-dock-toggle");
+  const before=(await anchor.boundingBox())!;
+  expect(before.width).toBe(29);
+  expect(before.height).toBe(29);
+  expect(await anchor.evaluate(el=>getComputedStyle(el).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
+  await anchor.click();
+  await expect(page.locator("#tool-dock-slot #sketch-tool-rail")).toHaveCount(1);
+  const after=(await anchor.boundingBox())!;
+  expect(Math.abs(after.x-before.x)).toBeLessThan(2);
+  expect(Math.abs(after.y-before.y)).toBeLessThan(2);
+  const tools=page.locator("#tool-dock-slot [data-tool]");
+  await expect(tools).toHaveCount(9);
+  const bounds=(await page.locator(".sketch-titlebar").boundingBox())!;
+  const last=(await tools.last().boundingBox())!;
+  expect(last.x+last.width).toBeLessThanOrEqual(bounds.x+bounds.width);
+  await anchor.click();
+  const restored=(await anchor.boundingBox())!;
+  expect(Math.abs(restored.x-before.x)).toBeLessThan(2);
+});
+
+test("hover-wheel edits exact numeric fields without changing the sketch wheel zoom",async({page})=>{
+  await page.goto("/");
+  await page.locator("#profiles-details summary").click();
+  await page.locator("#profile-list .profile-item").first().click();
+  await page.locator("#properties-details summary").click();
+  const width=page.locator('[data-binding-target="profile:plate:width"]');
+  await expect(width).toHaveValue("100");
+  await width.hover();
+  await page.mouse.wheel(0,-120);
+  await expect(page.locator('[data-binding-target="profile:plate:width"]')).toHaveValue("101");
+  const project=await saveProject(page);
+  expect(project.profiles[0].width).toBe(101);
+});

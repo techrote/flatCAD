@@ -284,8 +284,8 @@ kbd{
 .face-context-menu .face-context-note{padding:8px 9px;color:#7da4c0;line-height:1.35}
 .cut-tool-metrics{
   position:absolute;bottom:12px;left:12px;right:12px;z-index:8;
-  padding:9px 11px;background:#441e30eb;border:1px solid #c75a75;
-  color:#ffced8;border-radius:6px;
+  padding:9px 11px;background:#203950eb;border:1px solid #6c9cba;
+  color:#d2edff;border-radius:6px;
   font:11px ui-monospace,Consolas,monospace;
   pointer-events:none;
 }
