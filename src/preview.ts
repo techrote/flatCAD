@@ -7,7 +7,7 @@ import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
 import { LineMaterial } from "three/addons/lines/LineMaterial.js";
-import {DEFAULT_RENDER_SETTINGS,effectivePixelRatio,type RenderSettings} from "./render-settings";
+import {DEFAULT_RENDER_SETTINGS,effectivePixelRatio,effectiveMsaaSamples,type RenderSettings} from "./render-settings";
 import type { GeometryMesh } from "./kernel-protocol";
 import { dragAction, orbitControlsBinding, type NavigationPreset } from "./navigation";
 import {nextHomeSide} from "./home-navigation";
@@ -53,6 +53,8 @@ export class Preview {
   private renderCount=0;
   private composer:EffectComposer|null=null;
   private ssaoPass:SSAOPass|null=null;
+  private pipelineKey="direct";
+  private appliedPixelRatio=0;
   private renderSettings:RenderSettings={...DEFAULT_RENDER_SETTINGS};
   private currentEdgeLines:number[]|null=null;
   private ambientLight!:THREE.AmbientLight;
@@ -428,9 +430,14 @@ export class Preview {
     this.camera.bottom=-span/2;
     this.camera.updateProjectionMatrix();
     clearTimeout(this.resizeTimer);
+    if(this.bufferWidth===width&&this.bufferHeight===height){
+      this.drawFrame();
+      return;
+    }
     const commit=()=>{
       if(!this.container.isConnected||this.container.clientWidth<2||
         this.container.clientHeight<2)return;
+      this.configureRenderBuffers(width,height);
       if(this.bufferWidth!==width||this.bufferHeight!==height){
         this.renderer.setSize(width,height,false);
         this.bufferWidth=width;
@@ -649,43 +656,87 @@ export class Preview {
   }
   private drawFrame():void{
     if(this.disposed)return;
-    if(this.renderSettings.ambientOcclusion&&this.composer)this.composer.render();
+    if(this.composer)this.composer.render();
     else this.renderer.render(this.scene,this.camera);
     this.renderCount++;
     this.container.dataset.frameCount=String(this.renderCount);
   }
-  private initComposer():void{
-    if(this.composer)return;
-    const composer=new EffectComposer(this.renderer);
+  /** A browser-default MSAA canvas does not feed EffectComposer targets.
+   * Explicit MSAA therefore uses a true multisampled WebGL2 render target
+   * even while SSAO is disabled; AO and MSAA become independent controls.
+   */
+  private retireComposer():void{
+    this.ssaoPass?.dispose();
+    this.composer?.dispose();
+    this.ssaoPass=null;
+    this.composer=null;
+  }
+  private createComposer(samples:number,aoEnabled:boolean,ratio:number,width:number,height:number):void{
+    const target=new THREE.WebGLRenderTarget(Math.max(1,width),Math.max(1,height),{
+      type:THREE.HalfFloatType,depthBuffer:true,samples
+    });
+    const composer=new EffectComposer(this.renderer,target);
     composer.addPass(new RenderPass(this.scene,this.camera));
-    const ao=new SSAOPass(this.scene,this.camera,
-      this.bufferWidth||512,this.bufferHeight||512,8);
-    ao.kernelRadius=8;
-    ao.minDistance=.005;
-    ao.maxDistance=.12;
-    composer.addPass(ao);
+    if(aoEnabled){
+      const ao=new SSAOPass(this.scene,this.camera,Math.max(1,width),Math.max(1,height),8);
+      ao.kernelRadius=this.renderSettings.aoRadius;
+      ao.minDistance=.005;
+      ao.maxDistance=.12;
+      composer.addPass(ao);
+      this.ssaoPass=ao;
+    }
     composer.addPass(new OutputPass());
     this.composer=composer;
-    this.ssaoPass=ao;
-    ao.kernelRadius=this.renderSettings.aoRadius;
-    const ratio=Number(this.container.dataset.pixelRatio)||
-      Math.min(window.devicePixelRatio||1,2);
     composer.setPixelRatio(ratio);
-    composer.setSize(this.bufferWidth||512,this.bufferHeight||512);
+    composer.setSize(Math.max(1,width),Math.max(1,height));
   }
-  /** AO is a genuine screen-space pass. SSAA raises render resolution and
-   * downsamples via canvas presentation, under a bounded framebuffer budget.
-   * Both are off by default and remain entirely presentation-only.
+  private configureRenderBuffers(width:number,height:number):void{
+    const s=this.renderSettings;
+    const deviceDpr=window.devicePixelRatio||1;
+    const ratio=effectivePixelRatio(s,deviceDpr,width,height,this.renderer.capabilities.maxTextureSize);
+    const px=Math.max(1,Math.round(width*ratio)),py=Math.max(1,Math.round(height*ratio));
+    const pixels=px*py;
+    const maxSamples=this.renderer.capabilities.maxSamples;
+    const selected=effectiveMsaaSamples(s.msaaSamples,maxSamples,pixels);
+    const explicit=s.msaaSamples!=="browser";
+    const targetSamples=selected??0;
+    const wantsComposer=s.ambientOcclusion||explicit;
+    const key=wantsComposer?"composer:"+targetSamples+":"+String(s.ambientOcclusion):"direct";
+    const ratioChanged=this.appliedPixelRatio!==ratio;
+    const pipelineChanged=this.pipelineKey!==key;
+    if(ratioChanged){
+      this.renderer.setPixelRatio(ratio);
+      this.appliedPixelRatio=ratio;
+      this.bufferWidth=0;
+    }
+    if(pipelineChanged){
+      this.retireComposer();
+      this.pipelineKey=key;
+      if(wantsComposer)this.createComposer(targetSamples,s.ambientOcclusion,ratio,width,height);
+      this.bufferWidth=0;
+    }else if(ratioChanged)this.composer?.setPixelRatio(ratio);
+    if(this.ssaoPass)this.ssaoPass.kernelRadius=s.aoRadius;
+    this.renderer.domElement.style.imageRendering=s.downsampleMode==="nearest"?"pixelated":"auto";
+    this.container.dataset.pixelRatio=String(ratio);
+    this.container.dataset.supersample=String(s.supersampling);
+    this.container.dataset.effectiveSupersample=String(ratio/Math.max(.5,deviceDpr));
+    this.container.dataset.renderPixelBudget=String(s.renderPixelBudget);
+    this.container.dataset.backingPixels=String(pixels);
+    this.container.dataset.msaaRequested=String(s.msaaSamples);
+    // Browser default samples are chosen by the browser; do not report a fictitious count.
+    this.container.dataset.msaaEffective=wantsComposer?String(targetSamples):"browser";
+    this.container.dataset.msaaMaxSamples=String(maxSamples);
+    this.container.dataset.msaaPath=wantsComposer?"offscreen":"browser";
+    this.container.dataset.aoEnabled=String(s.ambientOcclusion);
+    this.container.dataset.downsampleMode=s.downsampleMode;
+  }
+  /** Settings only touch display buffers; exact OCCT B-rep and saved CAD data
+   * remain untouched. Framebuffer sizes and sample products are bounded.
    */
   setRenderSettings(settings:RenderSettings):void{
     this.renderSettings={...settings};
     this.ambientLight.intensity=settings.ambientLight;
     this.keyLight.intensity=settings.keyLight;
-    if(settings.ambientOcclusion)this.initComposer();
-    if(this.ssaoPass){
-      this.ssaoPass.enabled=settings.ambientOcclusion;
-      this.ssaoPass.kernelRadius=settings.aoRadius;
-    }
     this.updateEdgePresentation();
     this.container.dataset.edgeMode=settings.edgeMode;
     this.container.dataset.edgeWidth=String(settings.edgeWidthPx);
@@ -693,15 +744,17 @@ export class Preview {
     this.container.dataset.ambientLight=String(settings.ambientLight);
     this.container.dataset.keyLight=String(settings.keyLight);
     this.container.dataset.aoRadius=String(settings.aoRadius);
-    const width=Math.max(1,this.container.clientWidth),
-      height=Math.max(1,this.container.clientHeight);
-    const ratio=effectivePixelRatio(settings,window.devicePixelRatio||1,width,height);
-    this.renderer.setPixelRatio(ratio);
-    this.composer?.setPixelRatio(ratio);
-    this.container.dataset.pixelRatio=String(ratio);
-    this.container.dataset.aoEnabled=String(settings.ambientOcclusion);
-    this.container.dataset.supersample=String(settings.supersampling);
-    this.bufferWidth=0;this.bufferHeight=0;
+    const width=this.container.clientWidth,height=this.container.clientHeight;
+    if(width<2||height<2||!this.container.isConnected){
+      // A hidden tiled Solid must not enlarge its previous WebGL buffer
+      // when the user requests 8× on a visible independent floating view.
+      // ResizeObserver will apply the stored settings upon reappearance.
+      this.renderer.domElement.style.imageRendering=
+        settings.downsampleMode==="nearest"?"pixelated":"auto";
+      this.container.dataset.downsampleMode=settings.downsampleMode;
+      return;
+    }
+    this.configureRenderBuffers(width,height);
     this.resize();
     this.requestRender();
   }

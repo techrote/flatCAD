@@ -27,7 +27,8 @@ import {installFloatingFrame} from "./floating-frame";
 import {FLOAT_OPACITY_KEY,loadFloatOpacity,saveFloatOpacity,validateFloatOpacity} from "./floating-opacity";
 import type {GeometryMesh} from "./kernel-protocol";
 import {loadRenderSettings,saveRenderSettings,validateRenderSettings,
-  DEFAULT_RENDER_SETTINGS,RENDER_SETTINGS_KEY,type RenderSettings} from "./render-settings";
+  DEFAULT_RENDER_SETTINGS,CLEAN_CAD_RENDER_SETTINGS,RENDER_SETTINGS_KEY,
+  type RenderSettings} from "./render-settings";
 import {
   ACTION_LABELS, PREFS_KEY, chordFromEvent, defaultPreferences, displayShortcut,
   loadPreferences, savePreferences, validatePreferences, validateShortcut, DEFAULT_SKETCH_TEXT, SKETCH_FONT_FAMILIES,
@@ -167,9 +168,12 @@ root.innerHTML=[
   '<dialog id="render-dialog" class="settings-dialog render-inspector"><div class="dialog-head"><div><strong>Render inspector</strong><small>Live display tuning · native CAD remains unchanged</small></div><button data-close="render-dialog" aria-label="Close render inspector">×</button></div>',
   '  <div class="dialog-scroll"><fieldset class="render-group"><legend>Antialiasing & occlusion</legend>',
   '    <label class="check render-effect-option"><input id="render-ao" type="checkbox"> Ambient occlusion (SSAO)</label>',
-  '    <label class="field"><span>Requested render resolution</span><select id="render-supersampling"><option value="1">Native (MSAA requested)</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="1.75">1.75×</option><option value="2">2×</option><option value="2.5">2.5×</option><option value="3">3× (budget capped)</option></select></label>',
+  '    <label class="field"><span>MSAA samples (independent of AO)</span><select id="render-msaa"><option value="browser">Browser default</option><option value="0">Off (0 samples)</option><option value="2">2 samples</option><option value="4">4 samples</option><option value="8">8 samples</option></select></label>',
+  '    <label class="field"><span>Requested SSAA resolution</span><select id="render-supersampling"><option value="1">Native (1×)</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option><option value="1.75">1.75×</option><option value="2">2×</option><option value="2.5">2.5×</option><option value="3">3×</option><option value="4">4×</option><option value="8">8× (experimental)</option></select></label>',
+  '    <label class="field"><span>Max framebuffer pixels per view</span><select id="render-pixel-budget"><option value="8000000">8M · safe default</option><option value="16000000">16M</option><option value="32000000">32M · experimental</option><option value="64000000">64M · experimental</option></select></label>',
+  '    <label class="field"><span>Canvas downsampling</span><select id="render-downsample"><option value="browser">Browser smoothing (default)</option><option value="nearest">Nearest / pixelated (diagnostic)</option></select></label>',
   '    <label class="render-knob"><span>AO sampling radius <output id="render-ao-radius-value">8</output></span><input id="render-ao-radius" type="range" min="0" max="24" step="1" value="8"></label>',
-  '    <small id="render-resolution-info" class="navigation-hint" aria-live="polite">Browser downsampling is fixed.</small>',
+  '    <small id="render-resolution-info" class="navigation-hint" aria-live="polite">Resolution and MSAA limits shown here.</small>',
   '  </fieldset><fieldset class="render-group"><legend>CAD edges</legend>',
   '    <label class="field"><span>Presentation</span><select id="render-edge-mode"><option value="native">Native 1 rendering pixel</option><option value="screen">Fixed screen-space width</option><option value="hidden">No edge lines</option></select></label>',
   '    <label class="render-knob"><span>Screen-space line width <output id="render-edge-width-value">1.5 px</output></span><input id="render-edge-width" type="range" min="0.5" max="5" step="0.25" value="1.5"></label>',
@@ -180,7 +184,7 @@ root.innerHTML=[
   '    <label class="render-knob"><span>Directional key <output id="render-light-key-value">3.0</output></span><input id="render-light-key" type="range" min="0" max="5" step="0.25" value="3"></label>',
   '    <small class="navigation-hint">Existing fill light remains at 1.0. All settings are UI preferences.</small>',
   '  </fieldset></div>',
-  '  <footer><button id="render-reset" class="button">Reset render</button><button data-close="render-dialog" class="button primary">Done</button></footer></dialog>'
+  '  <footer><button id="render-clean-preset" class="button">Clean CAD preset</button><button id="render-reset" class="button">Reset render</button><button data-close="render-dialog" class="button primary">Done</button></footer></dialog>'
 ].join("\n");
 
 function byId<T extends HTMLElement=HTMLElement>(id:string):T{
@@ -1341,17 +1345,34 @@ function renderResolutionInfo():void{
     document.querySelector<HTMLElement>(".floating-render-canvas")??main;
   const canvas=host.querySelector<HTMLCanvasElement>("canvas");
   const ratio=Number(host.dataset.pixelRatio)||1;
+  const scale=Number(host.dataset.effectiveSupersample)||ratio/Math.max(.5,window.devicePixelRatio||1);
+  const requested=renderSettings.supersampling;
   const size=canvas&&host.clientWidth>1
     ?host.clientWidth+"×"+host.clientHeight+" CSS px → "+
-      canvas.width+"×"+canvas.height+" backing px":"No active Solid viewport";
+      canvas.width+"×"+canvas.height+" backing px"
+    :"No visible Solid viewport";
+  const samples=host.dataset.msaaEffective??"unavailable";
+  const requestedSamples=renderSettings.msaaSamples;
+  const hardwareMax=host.dataset.msaaMaxSamples??"?";
+  const samplesNote=samples==="browser"
+    ?"browser-default canvas MSAA (sample count chosen by browser)"
+    :samples+" offscreen samples (requested "+requestedSamples+"; hardware max "+hardwareMax+")";
+  const aoCaveat=requestedSamples==="browser"&&renderSettings.ambientOcclusion
+    ?" · AO composer bypasses browser canvas MSAA; select explicit 2/4/8 samples":"";
+  const clampNote=scale+0.01<requested?" · reduced by framebuffer/texture budget":"";
   byId("render-resolution-info").textContent=
-    size+" · effective "+ratio.toFixed(2)+"× · browser compositor downsampling "+
-    "(no filter parameters in this rendering path) · max 8M pixels/view";
+    size+" · SSAA requested "+requested+"×, effective "+scale.toFixed(2)+
+    "×"+clampNote+" · MSAA "+samplesNote+aoCaveat+
+    " · max "+(renderSettings.renderPixelBudget/1e6)+"M backing pixels/view"+
+    " · browser smooth or nearest canvas scaling (custom shader filters not installed)";
 }
 function syncRenderInspector():void{
   const s=renderSettings;
   input("render-ao").checked=s.ambientOcclusion;
   select("render-supersampling").value=String(s.supersampling);
+  select("render-msaa").value=String(s.msaaSamples);
+  select("render-pixel-budget").value=String(s.renderPixelBudget);
+  select("render-downsample").value=s.downsampleMode;
   select("render-edge-mode").value=s.edgeMode;
   input("render-edge-width").value=String(s.edgeWidthPx);
   input("render-edge-opacity").value=String(s.edgeOpacity);
@@ -1549,6 +1570,18 @@ select("render-supersampling").onchange=()=>applyRenderSettings({
   ...renderSettings,supersampling:
     (Number(select("render-supersampling").value) as RenderSettings["supersampling"])
 });
+select("render-msaa").onchange=()=>applyRenderSettings({
+  ...renderSettings,msaaSamples:select("render-msaa").value==="browser"
+    ?"browser":Number(select("render-msaa").value) as RenderSettings["msaaSamples"]
+});
+select("render-pixel-budget").onchange=()=>applyRenderSettings({
+  ...renderSettings,renderPixelBudget:
+    Number(select("render-pixel-budget").value) as RenderSettings["renderPixelBudget"]
+});
+select("render-downsample").onchange=()=>applyRenderSettings({
+  ...renderSettings,downsampleMode:
+    select("render-downsample").value as RenderSettings["downsampleMode"]
+});
 select("render-edge-mode").onchange=()=>applyRenderSettings({
   ...renderSettings,edgeMode:select("render-edge-mode").value as RenderSettings["edgeMode"]
 });
@@ -1562,6 +1595,7 @@ for(const [id,field] of [
 input("render-edge-color").oninput=()=>applyRenderSettings({
   ...renderSettings,edgeColor:input("render-edge-color").value
 });
+button("render-clean-preset").onclick=()=>applyRenderSettings({...CLEAN_CAD_RENDER_SETTINGS});
 button("render-reset").onclick=()=>applyRenderSettings({...DEFAULT_RENDER_SETTINGS});
 button("tile-reset").onclick=()=>{
   workspaceLayout.resetArrangement();select("tile-mode").value=workspaceLayout.tileMode;
