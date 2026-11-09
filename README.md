@@ -1,195 +1,50 @@
 # flatCAD
 
-**flatCAD** is an experimental local-first single-plane (2.5D) CAD editor. Draw profiles in one fixed XY plane using millimetres, then add or remove exact solid material along Z. It is intended to become an engineering-grade alternative to freeform drawing tools for plates, brackets, panels and machined parts.
+**flatCAD** is a local-first, browser-based 2.5D CAD editor for plates, panels, brackets and similar prismatic parts. Draw profiles in an XY sketch measured in millimetres; add or remove material along Z. Exact OpenCascade boundary-representation (B-rep) geometry drives the solid preview and STEP export.
 
-> **Status:** M0 proof-of-concept. Not qualified for fabrication, tolerance-critical work or production use.
+**Beta 1 status:** The Sketch/Solid workflow and interface passed owner interaction testing and automated browser tests. STEP export is implemented, but independent STEP readback and fabrication-grade validation remain outstanding. **Do not treat this beta as manufacturing-qualified.**
 
-## Quick start
+![flatCAD sketch, solid preview and feature history](docs/images/flatcad-workspace.png)
 
-Requires Node.js 22 or newer.
+*XY sketch, exact solid preview and ordered feature history.*
 
-~~~sh
-npm install
+![flatCAD with multiple independent floating solid views](docs/images/flatcad-floating-views.png)
+
+*Multiple independent Solid cameras; the Sketch and model share one document.*
+
+## Features
+
+| Area | Available in Beta 1 | Scope / limitation |
+| --- | --- | --- |
+| Sketch | Rectangles, centre rectangles, circles, polygons, slots, open/closed polylines; grid and geometry snapping | Single XY plane; no constraint solver, trim/offset or general region extraction |
+| Solid modelling | Exact sequential add/cut extrusions, signed Z depths, through-all assistance, temporary solid preview | Z-directed features; no arbitrary sketch workplanes, fillets or chamfers |
+| Editing | Selection and groups, move/duplicate/delete, numeric properties, named parameters, undo/redo, editable feature history | Feature evaluation order remains chronological |
+| Workspace | Resizable Sketch/Solid panels, dockable Sketch toolbar, history thumbnails, up to three independent floating Solid views | View settings do not change model geometry |
+| Presentation | Orthographic orbit/pan/zoom, CAD outlines, MSAA and experimental rendering controls | AO and high-resolution supersampling are not quality-qualified |
+| Files | Local autosave, versioned \`.flatcad.json\` save/open, STEP export, settings JSON import/export | No STEP import; independent STEP round-trip validation pending |
+
+## Run locally
+
+Requires **Node.js 22+** and a current desktop browser (Firefox or Chrome).
+
+\`\`\`sh
+git clone https://github.com/techrote/flatCAD.git
+cd flatCAD
+npm install --no-audit --no-fund
 npm run dev
-~~~
+\`\`\`
 
-Open the localhost URL Vite prints. A 100 × 60 × 8 mm demo plate with two Ø10 through-holes is loaded initially. No backend or account is required. Initial WASM load can be slow. The application does not require an internet connection after dependencies and the build have been installed.
+Open the local URL printed by Vite. On Windows PowerShell, use \`npm.cmd\` if \`npm\` is blocked by execution policy. The repository does not currently include a lockfile: use \`npm install\`, **not** \`npm ci\`.
 
-To build a static local bundle:
+For a production bundle: \`npm run build\`, then \`npm run preview\`. The OpenCascade WASM worker runs locally; no account or hosted backend is needed.
 
-~~~sh
-npm run typecheck
-npm test
-npm run build
-npm run preview
-~~~
+## Documentation
 
-Use the rectangle or circle tools to draw profiles, select a profile, and choose **Extrude/Add** or **Cut** with exact Z and depth inputs. Edit dimensions in the properties panel. Export a STEP file from a valid solid or download a native .flatcad.json project. The 3D panel is a tessellated visualization of the exact OpenCascade solid, not the authoritative geometry.
+- **[User guide](docs/USER-GUIDE.md)** — first model, sketching, extrusions, history, file handling and views
+- **[Reference sheet](docs/REFERENCE-SHEET.md)** — tools, defaults, shortcuts, navigation and menu paths
+- [Architecture](docs/ARCHITECTURE.md) · [Roadmap](docs/ROADMAP.md) · [Qualification criteria](docs/ACCEPTANCE.md)
+- [Original README (archive)](docs/README-ARCHIVE-2026-11-09.md) · [Screenshot provenance](docs/images/README.md)
 
-## Direct workflow
+## Licence and qualification
 
-**Multi-select:** Hold Ctrl (or Command on macOS) and click sketch objects to add/remove them from a selection. Click a selected object normally to drag the selected group; Ctrl+D duplicates and Delete removes the group. Press E to extrude or cut all selected closed profiles in one undoable action.
-
-**Contextual extrusion:** The E popover anchors a corner to the initiating mouse position (flipping corners at viewport edges). Sketch-outline overlap is allowed; if the popup would cover the extrusion arrow, it shifts sideways. A triangular arrowhead acts as the draggable depth grip and now supports negative depths. The **Preview in solid view** checkbox shows a provisional OpenCascade B-rep recomputation, tinted by Add/Cut; disabling preview or cancelling restores the committed solid. Preview operations never modify the saved project until Apply.
-
-**Face-driven dimensions:** While Extrude/Cut is active, focus **Start Z** or **Depth**, then click a *horizontal* face of the existing solid. Start Z becomes that face's Z elevation; Depth becomes face Z minus Start Z, so Start Z 8 and a face at Z 2 produces **−6 mm**. The face picker targets committed geometry even while optional operation preview is shown. Opposite-direction extrusion also works by typing a negative Depth directly.
-
-**CAD mouse controls:** Under Settings → CAD navigation controls choose Fusion (default: MMB pan, Shift+MMB orbit), SOLIDWORKS, Onshape or Blender. The selection persists in settings JSON; mouse-wheel zoom remains available, and **Shift+wheel accelerates Solid zoom 3×** in both docked and floating cameras.
-
-## Direct workflow
-
-Choose a tool from the sketch rail, or use L (line), R (rectangle), Shift+R (centre rectangle), C (circle), P (polygon), or S (slot). Drag a shape and select it; press **E** to open contextual extrusion/cut controls. The numeric flyout lets you override Add/Cut and exact depth; drag its amber on-canvas arrow for a faster depth adjustment. Open **Settings → Keyboard shortcuts** (K) for rebinding, clearing, resetting and JSON import/export. Open **Grid and snapping** (G) to configure all three grid tiers independently. Menus contain all corresponding commands; exact properties and history panels start collapsed.
-
-## What is implemented
-
-- Fixed XY millimetre sketching plane with rectangles, centre rectangles, circles, regular polygons, slots, open/closed polylines, editable handles, three configurable grid tiers and snapping.
-- Editable profile dimensions, selection, deletion, undo/redo and feature list.
-- Sequential exact B-rep extrusion, addition and subtraction in an isolated Web Worker using replicad + OpenCascade.js. E invokes a contextual Add/Cut combo tool with an on-canvas depth arrow and editable Z/depth.
-- Three.js preview and STEP export, versioned JSON project save/open and local autosave.
-- Deterministic model/validation tests, real-browser acceptance tests, editable shortcut settings, settings JSON import/export and CI build gates.
-
-## Explicitly not yet implemented
-
-Geometric constraint solving, standalone arcs, automatic region extraction from intersecting/nested edges, trim/offset, DXF, STEP round-trip validation, arbitrary face sketching, fillets, chamfers, feature reordering, robust overlapping-profile picking, solver conflict reports, manufacturing qualification.
-
-**Engineering caution:** The current tests are not evidence of complete B-rep correctness or reliable interchange. See [Acceptance](docs/ACCEPTANCE.md).
-
-## Experimental UI: floating Solid and wheel fields
-
-The View and Layout menus provide a floating Solid mode plus up to three independent floating CAD cameras. The floating window has a subtly translucent 20% dark background by default (adjustable from 0% to 100% in Layout → Workspace tiles) but **the whole rectangular viewport blocks interaction with the Sketch beneath it**, including empty pixels. Its camera uses exactly the same configured CAD mouse controls as the docked Solid (Fusion: middle-button pan, Shift+middle-button orbit, wheel zoom); left-click horizontal faces can still populate a focused Z/Depth field. **Drag the full-width top-left move bar to reposition a floating viewport**; it expands to the space beside the navigation buttons as the frame resizes, and never moves the rendered object. Drag its bottom-left or bottom-right grip to resize (the upper corners remain clear of the toolbar). Its single Home control resets to the current camera hemisphere, then toggles to the opposite hemisphere when clicked again from a Home pose. Layout → Workspace tiles provides a floating-window background opacity slider; opacity does not change pointer blocking or CAD geometry. Frame positions, sizes and opacity are stored in UI preferences independently of the CAD document and restored after reload. Dock Solid restores the conventional tile. Numeric properties can be adjusted by hovering and scrolling (Shift for fine, Ctrl for coarse steps). Clicking a timeline Cut briefly displays its exact translucent cutter for 867 ms.
-
-## Documents
-
-- [Independent floating CAD render views and visibility](docs/ADR-0009-FLOAT-RENDER-VIEWS.md)
-- [Owner-approved product vision and agent design contract](docs/PRODUCT-VISION.md)
-- [Experimental named parameters and formula data model](docs/ADR-0007-NAMED-PARAMETERS.md)
-- [Canvas-first UX and shortcuts](docs/UX-DIRECT-INTERACTION.md)
-- [Architecture](docs/ARCHITECTURE.md)
-- [Roadmap](docs/ROADMAP.md)
-- [Acceptance and qualification](docs/ACCEPTANCE.md)
-- [Dependencies and licensing](docs/DEPENDENCIES.md)
-- [Contributor/agent instructions](AGENTS.md)
-
-## Licensing
-
-The project's own license has **not yet been selected**; publication does not grant a license. Third-party dependencies have their own license obligations (including LGPL-2.1-only OpenCascade WASM); see the dependency record.
-
-## Click–click sketch authoring (post-M1 candidate)
-
-For rectangle, centre rectangle, circle, polygon and slot, you may **click once** to anchor the first point, then move the cursor to preview and **click again** to establish dimensions or the secondary datum. Click-and-drag remains supported. If a press/release gives a degenerate zero-size shape (including one collapsed axis), the first point is retained instead of silently discarded. Hold Shift on the second click for a square rectangle; Esc cancels.
-
-The sketch background is not an HTML draggable object. Ordinary left-drag on a blank area in Select mode neither creates geometry nor moves the grid. Use explicit Pan tool or middle-drag for viewport navigation.
-
-The 3D reference grid is purely visual and is placed below the lowest displayed model/cutting-tool geometry to prevent apparent sinking through the grid. This never changes the authoritative XY sketch plane or saved CAD coordinates.
-
-## Stable Solid viewport and provenance thumbnails (candidate)
-
-The Solid camera maintains its azimuth/elevation, zoom and pan position across ordinary add/cut operations, feature edits, pending previews, cancel and successful/failed recomputations. The camera fits the first solid automatically; thereafter **Fit** (F or View → Fit Solid) is an explicit action. The previous valid solid remains visible during worker computations rather than flashing to blank; a failed rebuild reports an error while retaining the last valid display (which may be stale relative to the current parameters).
-
-Open the collapsed **Feature history** drawer to see one post-operation **OpenCascade B-rep-derived thumbnail** per feature. Captions are `Extrude · Rectangle 1`, `Cut · Circle 2`, etc. Cut thumbnail overlays the complete cutting tool in red, including Z overshoot. Thumbnails are generated separately from the primary Solid update and are not an alternative to exact source geometry. Large histories can take longer to generate.
-
-Only valid horizontal faces have the bright cyan hover overlay; side faces are not coloured. Actual CAD B-rep edge endpoints have a larger 17-pixel hover radius and an equally sized translucent green 3D sphere. These visual/topological coordinates do not create persistent CAD face/vertex references.
-
-
-## Resizable workspace and compact history tiles
-
-The Sketch/Solid separator and the Solid/inspector separator support pointer dragging, keyboard arrow adjustments when focused, and double-click to restore their defaults. Their positions are stored locally under a versioned UI-layout key, **not** in the engineering project. On narrower windows, the main divider changes to a vertical Sketch/Solid split; the sketch and solid viewports resize without losing their contents or camera.
-
-The toolbar can be **docked to the Sketch title bar** using the Dock toggle, or undocked into the floating vertical rail. All tools and shortcuts continue to work in either location; placement is remembered locally.
-
-Feature History now presents **newest-first, compact, multi-column tiles** showing the exact post-operation B-rep-derived snapshots (including red cutting-tool overlays). Clicking one tile opens a **single** contextual operation/Start Z/Depth/delete editor above the tiles. Clicking the same tile or its × button closes it. Editing one feature does not reorder the underlying CAD feature replay.
-
-The permanent bottom status bar and Sketch bottom strip are removed: **Undo/Redo, Grid, tool dock, zoom and profile count** live in the Sketch title bar, and the **exact B-rep volume plus a build-status indicator** live in the Solid title bar. Preview volume is explicitly marked; errors still appear as a contextual message while remaining available to assistive technology.
-
-## Experimental Render inspector
-
-Render → Effects and antialiasing opens a **nonmodal** diagnostic panel so the model stays undimmed for live A/B comparisons. Compare original **native 1-backing-pixel** edges, optional **fixed CSS-pixel width** edges (0.5–5px) and **hidden** edges, with colour/opacity controls. Tune existing ambient/key lighting and the SSAO sample radius separately. Supersampling offers intermediate steps and reports the actual display backing resolution and effective pixel ratio. Even at "Native", flatCAD requests native MSAA. The browser currently chooses the downsampling filter; there is no custom filter dial. All controls are display-only preferences and leave CAD geometry and STEP unchanged. See [Render diagnostics ADR](docs/ADR-0010-RENDER-DIAGNOSTICS.md).
-
-
-## Experimental MSAA / high-resolution SSAA diagnostics
-
-In the nonmodal **Render inspector**, select MSAA independently of ambient occlusion:
-**Browser default**, **Off (0)**, **2**, **4** or **8** samples. Browser default
-uses the existing antialiased canvas only when no postprocessing is active.
-An AO pass renders offscreen, so select explicit MSAA to combine AO with
-multisampling. Explicit sample counts use a Three.js multisampled render target;
-the UI reports the requested, hardware-capped and sample-memory-budgeted count.
-
-Requested SSAA now includes **4×** and **8×**, with selectable per-view pixel
-budgets of **8M (default), 16M, 32M or 64M (experimental)**. 8× means eight
-times the linear render dimensions (up to **64×** as many pixels as native),
-not eight samples. The UI displays the *effective* resolution after budget,
-hardware texture and dimension limits, so choosing 8× does not falsely imply
-8× was achieved on a large viewport. The existing demand-driven renderer
-remains unchanged; these settings affect memory and latency when frames render.
-A further 64-million sample-pixel ceiling may reduce MSAA at high SSAA.
-
-**Canvas downsampling** offers Browser smoothing (original appearance) and
-Nearest/pixelated (useful as a diagnostic, not a quality filter). The browser's
-smooth downsampling kernel cannot be parametrically controlled through this
-pipeline. Lanczos, tent, box or sharpening would require an actual explicit
-GPU filtering pass with colour-space and performance qualification, not a
-cosmetic UI dropdown.
-
-The **Clean CAD preset** reproduces the owner's preferred experimental look:
-AO off, native SSAA, screen-space edges 0.5 CSS px at 50% opacity, ambient
-light 0.75 and key directional light 5. It is a selectable preference, not
-a change to the physically accepted historical defaults. Neither settings
-nor presets are part of the CAD document or change STEP output.
-See [ADR-0011](docs/ADR-0011-AA-CONTROLS.md).
-
-
-## CAD lines and AO depth repair (experimental)
-
-The Render inspector's CAD edges section now defaults to **Lines on, 1 CSS px,
-pure black, 100% opacity**, drawn using the same screen-space line material at
-every resolution. There is no separate native/screen/hidden presentation mode
-dropdown: uncheck **Lines** to hide presentation edges, or adjust the one
-width slider directly. The optional historical **Clean CAD** preset still
-restores its separate 0.5px/50% visual experiment. Existing v1 preferences
-migrate from their old edge modes without discarding user-set widths/colours.
-
-The default **SSAO remains off**. Three.js's SSAO shader operates on normalized
-depth values; the old raw `minDistance=.005` excluded any occlusion closer
-than about 500mm for the current orthographic camera. The experimental AO
-path now derives its depth thresholds in millimetres from the camera range,
-making smaller fillets/recesses eligible for actual occlusion. The
-offscreen colour and transparency match to browser-default rendering is
-tracked separately with screenshot-based A/B tests (no CAD document changes).
-See [ADR-0012](docs/ADR-0012-RENDER-PARITY-AO-LINES.md).
-
-
-**AO qualification:** The old SSAO thresholds were ineffective on
-millimetre-scale parts, and a controlled AO on/off screenshot test
-still shows no measurable occlusion after correcting them. AO therefore
-remains disabled by default, behind the collapsed *Experimental AO
-diagnostics* section rather than in the main render controls. The
-offscreen MSAA compositor now uses a parity-calibrated background
-clear colour, matching the original direct dark backdrop in the
-Chromium A/B test; matching transparency on floating views remains a
-separate acceptance check.
-
-### Rendering inspector and sketch shortcuts
-
-The Render inspector is **nonmodal**: opening it does not disable CAD drawing shortcuts, undo/redo, the shortcut editor or temporary Space-to-pan when keyboard focus is in the CAD workspace. Keyboard shortcuts for drawing/tools stay active even when focus remains on the Render inspector's non-text controls (for example, its Close button or line-width slider). Native range-adjustment arrows, Space/Enter activation, and text/dropdown editing retain their normal browser behavior. Modal dialogs such as Keyboard shortcuts and Grid still suppress global CAD shortcuts. The floating-window background is subtly darkened at **20% opacity for new installations**; existing user-selected opacity, including 0% fully transparent, is preserved.
-
-## Tool-aware Sketch cursor and Keybinds menu
-
-Drawing tools display a tiny visual glyph **orbiting the native crosshair at roughly 42px distance**, starting below-right. Moving toward it pushes it around the ring; moving away makes it chase with a brief, bounded spring-like settling motion. The precise crosshair remains unobstructed; the indicator clamps near edges and never intercepts pointer input or enters the saved CAD model. Line, rectangle, centre rectangle, circle, polygon, slot and extrude use the corresponding Sketch toolbar glyph. Select and Pan retain their existing native cursors.
-
-The new **Keybinds** top-level dropdown lists current keyboard shortcuts for every configured action; clicking one opens the same validated shortcut editor in recording mode. **View / reassign all…** opens the complete editor, also available from Settings → Keyboard shortcuts or **K**. Reassignments, clear/reset and JSON import/export still use the single existing `flatcad.preferences.v1` preference store, not the CAD document.
-
-### Floating Sketch toolbar drag, side-snapping and overlap priority
-
-The undocked Sketch rail can be moved by its own top drag grip. Dragging the rail
-near the **left or right Sketch viewport edge** magnetically snaps it into a
-vertical edge position; dragging away frees it again. The selected position
-and side are UI-only preferences, preserved separately from the CAD project.
-Clicking the toolbar grip without dragging still anchors the rail in the Sketch
-titlebar. The drag grip also supports keyboard arrow movement (Shift for 1px).
-The original draggable titlebar anchor remains available.
-
-For overlapping windows, Sketch toolbar **tool buttons** are above floating
-render windows, floating **render move bars** are above those tool buttons,
-and the Sketch toolbar's **drag grip** is above both. This ordering is
-intentional and never changes camera or sketch geometry.
+The project does not yet specify its own licence; public source availability does not grant a reuse licence. Dependencies have separate obligations, including OpenCascade WASM. See [dependency and licence notes](docs/DEPENDENCIES.md). The beta is not certified for fabrication, dimensional tolerances or downstream STEP interchange.
