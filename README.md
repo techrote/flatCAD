@@ -4,13 +4,12 @@
 
 **Beta 1 status:** The Sketch/Solid workflow and interface passed owner interaction testing and automated browser tests. STEP export is implemented, but independent STEP readback and fabrication-grade validation remain outstanding. **Do not treat this beta as manufacturing-qualified.**
 
-![flatCAD sketch, solid preview and feature history](docs/images/flatcad-workspace.png)
+<p align="center">
+  <a href="docs/images/flatcad-workspace.png"><img src="docs/images/flatcad-workspace.png" width="49%" alt="XY Sketch workspace, Solid preview and feature history"></a>
+  <a href="docs/images/flatcad-floating-views.png"><img src="docs/images/flatcad-floating-views.png" width="49%" alt="Independent floating Solid camera views above Sketch"></a>
+</p>
 
-*XY sketch, exact solid preview and ordered feature history.*
-
-![flatCAD with multiple independent floating solid views](docs/images/flatcad-floating-views.png)
-
-*Multiple independent Solid cameras; the Sketch and model share one document.*
+<sub>Left: Sketch, Solid and feature history. Right: independent floating Solid views. Click an image to enlarge.</sub>
 
 ## Features
 
