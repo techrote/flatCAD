@@ -21,7 +21,7 @@
 | Delete selected | **Delete** | Removes selection and dependent features as required |
 | Duplicate | **Ctrl+D** | Copies selected profiles |
 | Undo / Redo | **Ctrl+Z / Ctrl+Shift+Z** | History of model edits |
-| Save native project | **Ctrl+S** | Downloads \`.flatcad.json\` |
+| Save native project | **Ctrl+S** | Downloads `.flatcad.json` |
 | Temporary Sketch pan | **Hold Space** | Restores the previous drawing tool when released |
 | Cancel / confirm tool | **Esc / Enter** | Contextual extrusion and pending polyline operations |
 
@@ -82,9 +82,9 @@ On macOS, Command can be used for multi-selection; configurable shortcut binding
 
 | File / state | Purpose |
 | --- | --- |
-| \`.flatcad.json\` | Editable, versioned native project, downloaded locally |
-| \`.step\` | B-rep export for external CAD; **independent readback not yet qualified** |
-| \`flatcad-settings.json\` | Shortcut, grid, polygon and mouse preferences |
+| `.flatcad.json` | Editable, versioned native project, downloaded locally |
+| `.step` | B-rep export for external CAD; **independent readback not yet qualified** |
+| `flatcad-settings.json` | Shortcut, grid, polygon and mouse preferences |
 | Browser local storage | Autosave and UI preferences; not a backup |
 
 **Default sketch grid:** Fine 1 mm (shown, snap off), Working 5 mm (shown, snap on), Major 25 mm (shown, snap off). Geometric snapping to vertices, centres and midpoints is enabled.

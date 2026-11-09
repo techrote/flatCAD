@@ -21,22 +21,22 @@
 | Editing | Selection and groups, move/duplicate/delete, numeric properties, named parameters, undo/redo, editable feature history | Feature evaluation order remains chronological |
 | Workspace | Resizable Sketch/Solid panels, dockable Sketch toolbar, history thumbnails, up to three independent floating Solid views | View settings do not change model geometry |
 | Presentation | Orthographic orbit/pan/zoom, CAD outlines, MSAA and experimental rendering controls | AO and high-resolution supersampling are not quality-qualified |
-| Files | Local autosave, versioned \`.flatcad.json\` save/open, STEP export, settings JSON import/export | No STEP import; independent STEP round-trip validation pending |
+| Files | Local autosave, versioned `.flatcad.json` save/open, STEP export, settings JSON import/export | No STEP import; independent STEP round-trip validation pending |
 
 ## Run locally
 
 Requires **Node.js 22+** and a current desktop browser (Firefox or Chrome).
 
-\`\`\`sh
+```sh
 git clone https://github.com/techrote/flatCAD.git
 cd flatCAD
 npm install --no-audit --no-fund
 npm run dev
-\`\`\`
+```
 
-Open the local URL printed by Vite. On Windows PowerShell, use \`npm.cmd\` if \`npm\` is blocked by execution policy. The repository does not currently include a lockfile: use \`npm install\`, **not** \`npm ci\`.
+Open the local URL printed by Vite. On Windows PowerShell, use `npm.cmd` if `npm` is blocked by execution policy. The repository does not currently include a lockfile: use `npm install`, **not** `npm ci`.
 
-For a production bundle: \`npm run build\`, then \`npm run preview\`. The OpenCascade WASM worker runs locally; no account or hosted backend is needed.
+For a production bundle: `npm run build`, then `npm run preview`. The OpenCascade WASM worker runs locally; no account or hosted backend is needed.
 
 ## Documentation
 
