@@ -965,7 +965,7 @@ test("sketch typography settings migrate and apply to canvas text",async({page})
 test("three-column layout reorders Properties between Sketch and Solid",async({page})=>{
   await page.setViewportSize({width:1500,height:850});
   await page.goto("/");
-  await openMenu(page,"settings","dialog.layout");
+  await openMenu(page,"layout","dialog.layout");
   await page.locator("#tile-mode").selectOption("columns");
   await expect(page.locator("#workbench-layout")).toHaveClass(/three-tiles/);
   const x=async(sel:string)=>(await page.locator(sel).boundingBox())!.x;
@@ -1184,4 +1184,100 @@ test("hover-wheel edits exact numeric fields without changing the sketch wheel z
   await expect(page.locator('[data-binding-target="profile:plate:width"]')).toHaveValue("101");
   const project=await saveProject(page);
   expect(project.profiles[0].width).toBe(101);
+});
+
+test("floating render face click reaches the armed extrude depth rather than starting drag",async({page})=>{
+  await page.setViewportSize({width:1440,height:820});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await openMenu(page,"view","view.float");
+  await page.locator("#profiles-details summary").click();
+  await page.locator("#profile-list .profile-item").nth(1).click();
+  await page.keyboard.press("e");
+  await expect(page.locator("#extrude-flyout")).toBeVisible();
+  await page.locator("#extrude-z").fill("0");
+  await page.locator("#extrude-depth").fill("2");
+  await page.locator("#extrude-depth").focus();
+  const canvas=page.locator("#preview canvas"),rect=(await canvas.boundingBox())!;
+  const x=rect.x+rect.width/2,y=rect.y+rect.height/2;
+  await page.mouse.move(x,y);
+  await expect(page.locator("#preview")).toHaveAttribute("data-float-hover","true");
+  const before=(await page.locator(".preview-panel").boundingBox())!;
+  await page.mouse.click(x,y);
+  await expect(page.locator("#extrude-depth")).toHaveValue("8");
+  const after=(await page.locator(".preview-panel").boundingBox())!;
+  expect(Math.abs(after.x-before.x)+Math.abs(after.y-before.y)).toBeLessThan(2);
+  await expect(page.locator("#preview")).not.toHaveAttribute("data-float-dragging","true");
+});
+
+test("floating viewport has visible boundary and icon-only home/fit/opposite/underground controls",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await openMenu(page,"view","view.float");
+  const nav=page.locator(".preview-panel .float-nav");
+  await expect(nav).toBeVisible();
+  await expect(nav.locator("button")).toHaveCount(4);
+  await expect(nav.locator("button svg")).toHaveCount(4);
+  await expect(nav).toHaveText("");
+  const border=await page.locator(".preview-panel").evaluate(el=>getComputedStyle(el).borderTopWidth);
+  expect(border).not.toBe("0px");
+  const host=page.locator("#preview");
+  const fitCount=Number(await host.getAttribute("data-camera-fit-count"));
+  await nav.locator('[data-nav="fit"]').click();
+  expect(Number(await host.getAttribute("data-camera-fit-count"))).toBe(fitCount+1);
+  await nav.locator('[data-nav="underground"]').click();
+  await expect(host).toHaveAttribute("data-home-mode","underground");
+  const below=(await host.getAttribute("data-camera-direction"))!.split(",").map(Number);
+  expect(below[2]).toBeLessThan(0);
+  await nav.locator('[data-nav="home"]').click();
+  const above=(await host.getAttribute("data-camera-direction"))!.split(",").map(Number);
+  expect(above[2]).toBeGreaterThan(0);
+  await nav.locator('[data-nav="opposite"]').click();
+  const opposite=(await host.getAttribute("data-camera-direction"))!.split(",").map(Number);
+  expect(opposite[0]).toBeCloseTo(-above[0],3);
+  await expect(page.locator("#menu-popover")).toBeHidden();
+});
+
+test("idle Solid viewport stops drawing frames; navigation invalidates only changed frames",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const host=page.locator("#preview");
+  await expect(host).toHaveAttribute("data-rendered-solid","true");
+  await page.waitForTimeout(500);
+  const count=Number(await host.getAttribute("data-frame-count"));
+  await page.waitForTimeout(430);
+  const later=Number(await host.getAttribute("data-frame-count"));
+  expect(later-count).toBeLessThanOrEqual(1);
+  const rect=(await page.locator("#preview canvas").boundingBox())!;
+  await page.mouse.move(rect.x+rect.width*.5,rect.y+rect.height*.5);
+  await page.mouse.down({button:"middle"});
+  await page.mouse.move(rect.x+rect.width*.6,rect.y+rect.height*.4,{steps:10});
+  await page.mouse.up({button:"middle"});
+  expect(Number(await host.getAttribute("data-frame-count"))).toBeGreaterThan(later);
+});
+
+test("View/Layout/Render menu separation and optional AO/SSAA preserve source geometry",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const volume=await page.locator("#status").getAttribute("data-volume-mm3");
+  await openMenu(page,"layout","dialog.layout");
+  await expect(page.locator("#layout-dialog")).toBeVisible();
+  await page.locator('[data-close="layout-dialog"]').last().click();
+  const errors:string[]=[];page.on("pageerror",e=>errors.push(e.message));
+  await openMenu(page,"render","dialog.render");
+  const settings=page.locator("#render-dialog");
+  await expect(settings).toBeVisible();
+  await page.locator("#render-ao").check();
+  await expect(page.locator("#preview")).toHaveAttribute("data-ao-enabled","true");
+  await page.locator("#render-supersampling").selectOption("1.5");
+  await expect(page.locator("#preview")).toHaveAttribute("data-supersample","1.5");
+  expect(Number(await page.locator("#preview").getAttribute("data-pixel-ratio"))).toBeGreaterThan(1);
+  await page.waitForTimeout(300);
+  await page.locator('[data-close="render-dialog"]').last().click();
+  expect(await page.locator("#status").getAttribute("data-volume-mm3")).toBe(volume);
+  expect(await page.evaluate(()=>localStorage.getItem("flatcad.project.v1"))).toBeNull();
+  expect(errors).toEqual([]);
+  await page.reload();
+  await expect(page.locator("#preview")).toHaveAttribute("data-ao-enabled","true");
+  await expect(page.locator("#preview")).toHaveAttribute("data-supersample","1.5");
 });
