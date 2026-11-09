@@ -4,6 +4,9 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { SSAOPass } from "three/addons/postprocessing/SSAOPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+import { LineSegments2 } from "three/addons/lines/LineSegments2.js";
+import { LineSegmentsGeometry } from "three/addons/lines/LineSegmentsGeometry.js";
+import { LineMaterial } from "three/addons/lines/LineMaterial.js";
 import {DEFAULT_RENDER_SETTINGS,effectivePixelRatio,type RenderSettings} from "./render-settings";
 import type { GeometryMesh } from "./kernel-protocol";
 import { dragAction, orbitControlsBinding, type NavigationPreset } from "./navigation";
@@ -51,6 +54,9 @@ export class Preview {
   private composer:EffectComposer|null=null;
   private ssaoPass:SSAOPass|null=null;
   private renderSettings:RenderSettings={...DEFAULT_RENDER_SETTINGS};
+  private currentEdgeLines:number[]|null=null;
+  private ambientLight!:THREE.AmbientLight;
+  private keyLight!:THREE.DirectionalLight;
 
   constructor(private readonly container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -144,10 +150,11 @@ export class Preview {
     surface.addEventListener("auxclick",e=>{if(e.button===1)e.preventDefault();});
     surface.addEventListener("contextmenu",e=>e.preventDefault());
 
-    this.scene.add(new THREE.AmbientLight(0xffffff, 2));
-    const key = new THREE.DirectionalLight(0xffffff, 3);
-    key.position.set(80, -40, 140);
-    this.scene.add(key);
+    this.ambientLight=new THREE.AmbientLight(0xffffff,2);
+    this.scene.add(this.ambientLight);
+    this.keyLight=new THREE.DirectionalLight(0xffffff,3);
+    this.keyLight.position.set(80,-40,140);
+    this.scene.add(this.keyLight);
     const fill = new THREE.DirectionalLight(0x6a9fff, 1);
     fill.position.set(-80, 70, 50);
     this.scene.add(fill);
@@ -453,6 +460,68 @@ export class Preview {
     return geometry;
   }
 
+  /** Display-only edges: native raster pixels vs genuine screen-space CSS width.
+   *  The kernel's B-rep geometry and native CAD project are never modified.
+   */
+  private makeEdgeObject(lines:number[]):THREE.Object3D|null{
+    if(!lines.length||this.renderSettings.edgeMode==="hidden")return null;
+    const settings=this.renderSettings;
+    let edge:THREE.Object3D;
+    if(settings.edgeMode==="screen"){
+      const geometry=new LineSegmentsGeometry();
+      geometry.setPositions(lines);
+      const material=new LineMaterial({
+        color:settings.edgeColor,linewidth:settings.edgeWidthPx,
+        worldUnits:false,transparent:settings.edgeOpacity<1,
+        opacity:settings.edgeOpacity,depthTest:true
+      });
+      edge=new LineSegments2(geometry,material);
+    }else{
+      const geometry=new THREE.BufferGeometry();
+      geometry.setAttribute("position",new THREE.Float32BufferAttribute(lines,3));
+      edge=new THREE.LineSegments(geometry,new THREE.LineBasicMaterial({
+        color:settings.edgeColor,transparent:settings.edgeOpacity<1,
+        opacity:settings.edgeOpacity,depthTest:true
+      }));
+    }
+    edge.name="flatcad-presentation-edges";
+    return edge;
+  }
+  private disposeEdge(edge:THREE.Object3D):void{
+    if(edge instanceof THREE.Mesh||edge instanceof THREE.LineSegments){
+      edge.geometry.dispose();
+      for(const material of (Array.isArray(edge.material)?edge.material:[edge.material]))
+        material.dispose();
+    }
+  }
+  private updateEdgePresentation():void{
+    if(!this.object||!this.currentEdgeLines)return;
+    const previous=this.object.getObjectByName("flatcad-presentation-edges");
+    const settings=this.renderSettings;
+    const sameMode=previous&&settings.edgeMode!=="hidden"&&(
+      (settings.edgeMode==="screen"&&previous instanceof LineSegments2)||
+      (settings.edgeMode==="native"&&previous instanceof THREE.LineSegments));
+    // Sliders modify existing GPU materials: avoid reallocating geometry per
+    // pointermove, especially with multiple floating WebGL contexts.
+    if(sameMode){
+      const material=(previous as THREE.Mesh|THREE.LineSegments).material;
+      if(!Array.isArray(material)){
+        const line=material as THREE.LineBasicMaterial|LineMaterial;
+        line.color.set(settings.edgeColor);
+        line.opacity=settings.edgeOpacity;
+        const transparent=settings.edgeOpacity<1;
+        if(line.transparent!==transparent){line.transparent=transparent;line.needsUpdate=true;}
+        if(line instanceof LineMaterial)line.linewidth=settings.edgeWidthPx;
+        this.requestRender();
+        return;
+      }
+    }
+    const next=this.makeEdgeObject(this.currentEdgeLines);
+    if(next)this.object.add(next);
+    if(previous){this.object.remove(previous);this.disposeEdge(previous);}
+    this.requestRender();
+  }
+
   /** Display buffers are built before the old group is released, so an
    * async rebuild never renders an empty intermediate scene.
    * Camera pose is untouched after the first model fit unless explicitly
@@ -464,6 +533,7 @@ export class Preview {
     if(!mesh||!mesh.triangles.length){
       if(this.object)this.retireGroup(this.object);
       this.object=null;
+      this.currentEdgeLines=null;
       if(!options.pending)this.setCommittedPickMesh(null);
       this.requestRender();
       this.referenceGrid.position.z=0;
@@ -491,12 +561,8 @@ export class Preview {
         tool.renderOrder=7;
         group.add(tool);
       }
-      if(mesh.edgeLines.length){
-        const lines=new THREE.BufferGeometry();
-        lines.setAttribute("position",new THREE.Float32BufferAttribute(mesh.edgeLines,3));
-        group.add(new THREE.LineSegments(lines,
-          new THREE.LineBasicMaterial({color:0x152a45})));
-      }
+      const edges=this.makeEdgeObject(mesh.edgeLines);
+      if(edges)group.add(edges);
       // Add replacement before retiring old geometry; all of this runs
       // synchronously within one animation frame.
       const previous=this.object;
@@ -504,6 +570,7 @@ export class Preview {
       this.object=group;
       if(!options.pending)this.setCommittedPickMesh(mesh);
       if(previous)this.retireGroup(previous);
+      this.currentEdgeLines=mesh.edgeLines;
       this.container.dataset.renderedSolid="true";
       if(options.pending==="cut"&&options.cutTool?.triangles.length)
         this.container.dataset.cutToolVisible="true";
@@ -600,6 +667,7 @@ export class Preview {
     composer.addPass(new OutputPass());
     this.composer=composer;
     this.ssaoPass=ao;
+    ao.kernelRadius=this.renderSettings.aoRadius;
     const ratio=Number(this.container.dataset.pixelRatio)||
       Math.min(window.devicePixelRatio||1,2);
     composer.setPixelRatio(ratio);
@@ -611,8 +679,20 @@ export class Preview {
    */
   setRenderSettings(settings:RenderSettings):void{
     this.renderSettings={...settings};
+    this.ambientLight.intensity=settings.ambientLight;
+    this.keyLight.intensity=settings.keyLight;
     if(settings.ambientOcclusion)this.initComposer();
-    if(this.ssaoPass)this.ssaoPass.enabled=settings.ambientOcclusion;
+    if(this.ssaoPass){
+      this.ssaoPass.enabled=settings.ambientOcclusion;
+      this.ssaoPass.kernelRadius=settings.aoRadius;
+    }
+    this.updateEdgePresentation();
+    this.container.dataset.edgeMode=settings.edgeMode;
+    this.container.dataset.edgeWidth=String(settings.edgeWidthPx);
+    this.container.dataset.edgeOpacity=String(settings.edgeOpacity);
+    this.container.dataset.ambientLight=String(settings.ambientLight);
+    this.container.dataset.keyLight=String(settings.keyLight);
+    this.container.dataset.aoRadius=String(settings.aoRadius);
     const width=Math.max(1,this.container.clientWidth),
       height=Math.max(1,this.container.clientHeight);
     const ratio=effectivePixelRatio(settings,window.devicePixelRatio||1,width,height);
