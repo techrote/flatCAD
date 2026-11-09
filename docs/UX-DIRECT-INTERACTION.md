@@ -162,9 +162,12 @@ The global bottom status bar is removed. Undo/Redo and Grid move to the Sketch h
 ## Tool-aware crosshair and Keybinds menu (experimental follow-up)
 
 Tool-state glyph cues appear near, not on, the actual Sketch input hotspot. The native
-crosshair remains precise: draw tools place their existing toolbar symbol below-left
-of the pointer inside Sketch; when approaching an edge the cue flips to remain
-within view. These presentation-only elements have `pointer-events:none`,
+crosshair remains precise: draw tools start with their existing toolbar symbol
+below-right, roughly 42 CSS pixels from the crosshair centre. A tiny damped
+angular response allows the symbol to chase when the pointer moves away and
+move laterally around the pointer when approached. The badge stays targeted
+to a circle rather than a fixed quadrant, without ever modifying the Sketch
+pointer hotspot; it clamps at viewport edges. These presentation-only elements have `pointer-events:none`,
 hide on pointer leave and for Select/Pan, and immediately track keyboard tool
 selection without an extra Sketch click. They do not change snapping or
 the model's physical coordinates.
@@ -175,3 +178,18 @@ modal validated recording flow; selecting "View / reassign all" reveals the
 full editor. The Settings menu and K shortcut remain available. Closing the
 editor must clear any unfinished recording so no subsequent global CAD key is
 intercepted. Pointer, keyboard and reload acceptance are required.
+
+### Free Sketch toolbar magnetic side docks and overlay input hierarchy
+
+The undocked toolbar has a separately accessible drag grip. Its buttons are
+in a fixed frontmost tool layer so floating render canvases cannot swallow
+tool selection. Dragging within a small threshold of either Sketch viewport
+edge snaps the whole vertical toolbar to that edge; free placement and side
+selection are persisted in UI-only storage. The separate existing titlebar
+anchor remains available with a click and can be repositioned horizontally.
+
+Floating render move bars are portalled to a layer above toolbar buttons,
+while the Sketch toolbar's own drag grip is in a final highest-priority
+layer. This establishes the exact hit-test order without changing geometry,
+camera ownership, rendering or modal-dialog behavior. Resize handles stay
+within their render panels and remain below Sketch tool controls.

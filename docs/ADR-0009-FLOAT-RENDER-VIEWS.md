@@ -22,3 +22,17 @@ navigation icons. This is UI chrome only: the bar has its own drag/keyboard
 handling and does not intercept navigation controls or change a solid's
 camera or B-rep. The bar grows with the frame width; the 3px gap and
 corner-radius alignment are retained.
+
+### Cross-window controls and input ordering
+
+When Sketch tools are undocked, their buttons live in a fixed overlay above
+floating render canvases; individual render move bars live in a second overlay
+above those buttons, and the Sketch tool drag grip lives in a third overlay
+above the move bars. Only those actual controls accept pointer input, so the
+rest of each overlay does not block Sketch or render interactions.
+
+Move-bar DOM is portalled and its screen geometry is synchronized to its
+owning viewport (including resize, drag and independent-view activation).
+The original per-view drag, keyboard arrow controls and persistence are
+reused rather than forked. This is UI layering only; no extra WebGL renderer
+or native CAD representation is created.

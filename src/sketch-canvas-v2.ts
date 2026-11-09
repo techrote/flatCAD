@@ -2,7 +2,8 @@ import { newId, type CadDocument, type Point2, type Profile } from "./model";
 import { centre, distance, handles, hit, isClosed, isSimplePolygon, moveHandle, outline, snapPoints, translate } from "./geometry";
 import type { Preferences } from "./preferences";
 import { draftProfile, type DrawTool } from "./draw-primitives";
-import {SKETCH_TOOL_GLYPHS,toolBadgePosition} from "./tool-cursor";
+import {SKETCH_TOOL_GLYPHS,toolBadgePosition,cursorOrbitPush,
+  cursorOrbitSettle,INITIAL_ORBIT,type CursorOrbit} from "./tool-cursor";
 
 export type SketchTool =
   | "select" | "line" | "rectangle" | "centerRectangle" | "circle" | "polygon" | "slot" | "pan" | "extrude";
@@ -52,6 +53,9 @@ export class SketchCanvas {
   private lastPointer:Point2|null=null;
   private readonly toolBadge:HTMLSpanElement;
   private pointerOnSketch=false;
+  private orbit:CursorOrbit={...INITIAL_ORBIT};
+  private orbitFrame:number|null=null;
+  private orbitPointer:Point2|null=null;
 
   constructor(
     private readonly canvas:HTMLCanvasElement,
@@ -104,8 +108,11 @@ export class SketchCanvas {
     if(this.tool==="line"&&tool!=="line")this.finishLine(false);
     this.cancelPendingDraw(false);
     this.tool=tool;this.gesture=null;
+    if(!SKETCH_TOOL_GLYPHS[tool])this.orbit={...INITIAL_ORBIT};
     this.canvas.style.cursor=tool==="pan"?"grab":tool==="select"?"default":"crosshair";
+
     this.refreshToolBadge();
+    if(this.pointerOnSketch)this.drawToolBadgeAtPointer();
     this.draw();
   }
   setSlotRadius(r:number):void {if(Number.isFinite(r)&&r>0)this.slotRadius=r;}
@@ -134,7 +141,11 @@ export class SketchCanvas {
     };
   }
   getViewport():{width:number;height:number}{return {width:this.width,height:this.height};}
-  dispose():void {this.observer.disconnect();this.toolBadge.remove();}
+  dispose():void {
+    this.observer.disconnect();
+    this.stopOrbitAnimation();
+    this.toolBadge.remove();
+  }
   hasPendingLine():boolean{return this.linePoints.length>0;}
   cancelLine():void {this.linePoints=[];this.lineCursor=null;this.draw();}
   removeLastLinePoint():void {this.linePoints.pop();this.draw();}
@@ -179,21 +190,58 @@ export class SketchCanvas {
     }else{
       this.toolBadge.textContent="";
       delete this.toolBadge.dataset.cursorTool;
+      this.stopOrbitAnimation();
     }
+  }
+  private drawToolBadgeAtPointer():void{
+    if(!this.pointerOnSketch||!this.orbitPointer)return;
+    const pos=toolBadgePosition(this.orbitPointer,
+      {width:this.width,height:this.height},this.orbit.angle);
+    this.toolBadge.style.left=pos.x+"px";
+    this.toolBadge.style.top=pos.y+"px";
+    this.toolBadge.dataset.orbitAngle=this.orbit.angle.toFixed(4);
+  }
+  private stopOrbitAnimation():void{
+    if(this.orbitFrame!==null)cancelAnimationFrame(this.orbitFrame);
+    this.orbitFrame=null;
+  }
+  private scheduleOrbitSettle():void{
+    if(this.orbitFrame!==null||!this.pointerOnSketch||
+      !SKETCH_TOOL_GLYPHS[this.tool])return;
+    const tick=()=>{
+      this.orbitFrame=null;
+      if(!this.pointerOnSketch||!SKETCH_TOOL_GLYPHS[this.tool])return;
+      this.orbit=cursorOrbitSettle(this.orbit);
+      this.drawToolBadgeAtPointer();
+      if(this.orbit.velocity!==0)this.orbitFrame=requestAnimationFrame(tick);
+    };
+    this.orbitFrame=requestAnimationFrame(tick);
   }
   private updateToolBadge(event:PointerEvent):void{
     const point=this.screen(event);
     this.pointerOnSketch=point.x>=0&&point.x<=this.width&&
       point.y>=0&&point.y<=this.height;
     if(this.pointerOnSketch){
-      const pos=toolBadgePosition(point,{width:this.width,height:this.height});
-      this.toolBadge.style.left=pos.x+"px";
-      this.toolBadge.style.top=pos.y+"px";
+      if(!SKETCH_TOOL_GLYPHS[this.tool])this.orbit={...INITIAL_ORBIT};
+      else if(this.orbitPointer){
+        this.orbit=cursorOrbitPush(this.orbit,{
+          x:point.x-this.orbitPointer.x,
+          y:point.y-this.orbitPointer.y
+        });
+      }
+      this.orbitPointer=point;
+      this.drawToolBadgeAtPointer();
+      this.scheduleOrbitSettle();
+    }else{
+      this.hideToolBadge();
     }
     this.refreshToolBadge();
   }
   private hideToolBadge():void{
     this.pointerOnSketch=false;
+    this.orbitPointer=null;
+    this.stopOrbitAnimation();
+    this.orbit={...INITIAL_ORBIT};
     this.toolBadge.hidden=true;
   }
   private world(point:Point2):Point2 {

@@ -30,10 +30,23 @@ export function moveResizeFloatRect(start:FloatRect,mode:FloatMode,dx:number,dy:
   return {left,top,width:right-left,height:bottom-top};
 }
 const viewport=():FloatViewport=>({width:Math.max(1,innerWidth),height:Math.max(1,innerHeight)});
+function floatingHandleLayer():HTMLElement{
+  const existing=document.querySelector<HTMLElement>(".floating-render-handle-layer");
+  if(existing)return existing;
+  const shell=document.querySelector<HTMLElement>(".shell");
+  if(!shell)throw Error("Floating move handle requires workspace shell");
+  const layer=document.createElement("div");
+  layer.className="floating-render-handle-layer";
+  shell.append(layer);
+  return layer;
+}
 export function installFloatingFrame(panel:HTMLElement,options:{
   enabled?:()=>boolean;onChange:(r:FloatRect)=>void;onEnd:()=>void;
+  onActivate?:()=>void;
 }):()=>void{
   const controls:HTMLButtonElement[]=[];
+  let cleanupMove:()=>void=()=>{};
+  const handleLayer=floatingHandleLayer();
   function add(mode:FloatMode,title:string){
     const b=document.createElement("button");b.type="button";
     b.className=mode==="move"?"float-window-handle":"float-corner-grip";
@@ -41,9 +54,39 @@ export function installFloatingFrame(panel:HTMLElement,options:{
       ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '+
         'stroke-width="1.75" stroke-linecap="round" aria-hidden="true">'+
         '<path d="M4 7h16M4 12h16M4 17h16"/></svg>' : "";
-    if(mode==="move")b.dataset.floatHandle="";else b.dataset.corner=mode;
+    if(mode==="move"){
+      b.dataset.floatHandle="";
+      b.dataset.floatOwner=panel.dataset.floatId??"tiled";
+      b.hidden=true; // no one-frame stray overlay until first measured sync
+      handleLayer.append(b);
+      const sync=()=>{
+        const visible=panel.isConnected&&(options.enabled?.()!==false);
+        b.hidden=!visible;
+        if(!visible)return;
+        const rect=panel.getBoundingClientRect();
+        const reserved=panel.classList.contains("floating-render-view")?131:101;
+        b.style.left=Math.round(rect.left+3)+"px";
+        b.style.top=Math.round(rect.top+3)+"px";
+        b.style.width=Math.max(46,Math.round(rect.width-reserved-3))+"px";
+        b.style.zIndex=String(Math.max(1,Number(panel.style.zIndex)||1));
+      };
+      const resize=new ResizeObserver(sync);resize.observe(panel);
+      const changed=new MutationObserver(sync);
+      changed.observe(panel,{attributes:true,attributeFilter:["style","class","hidden"]});
+      const layout=panel.closest(".workbench-layout");
+      if(layout)changed.observe(layout,{attributes:true,attributeFilter:["class"]});
+      window.addEventListener("resize",sync);
+      cleanupMove=()=>{
+        resize.disconnect();changed.disconnect();
+        window.removeEventListener("resize",sync);
+      };
+      requestAnimationFrame(sync);
+    }else{
+      b.dataset.corner=mode;
+      panel.append(b);
+    }
     b.title=title;b.setAttribute("aria-label",title);
-    panel.append(b);controls.push(b);
+    controls.push(b);
     let drag:{id:number;x:number;y:number;rect:FloatRect;changed:boolean}|null=null;
     const apply=(r:FloatRect)=>{
       panel.style.left=Math.round(r.left)+"px";panel.style.top=Math.round(r.top)+"px";
@@ -52,6 +95,7 @@ export function installFloatingFrame(panel:HTMLElement,options:{
     };
     b.addEventListener("pointerdown",e=>{
       if(e.button!==0||options.enabled?.()===false)return;
+      options.onActivate?.();
       const r=panel.getBoundingClientRect();
       drag={id:e.pointerId,x:e.clientX,y:e.clientY,
         rect:{left:r.left,top:r.top,width:r.width,height:r.height},changed:false};
@@ -74,6 +118,7 @@ export function installFloatingFrame(panel:HTMLElement,options:{
     b.addEventListener("pointerup",finish);b.addEventListener("pointercancel",finish);
     b.addEventListener("keydown",e=>{
       if(options.enabled?.()===false)return;
+      options.onActivate?.();
       const dirs:Record<string,[number,number]>={
         ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};
       const delta=dirs[e.key];if(!delta)return;
@@ -87,5 +132,8 @@ export function installFloatingFrame(panel:HTMLElement,options:{
   add("move","Move floating viewport");
   for(const c of ["sw","se"] as const)
     add(c,"Resize floating viewport from "+c.toUpperCase()+" corner");
-  return ()=>{for(const b of controls)b.remove();};
+  return ()=>{
+    cleanupMove();
+    for(const b of controls)b.remove();
+  };
 }

@@ -564,3 +564,10 @@
 }
 #render-dialog .render-advanced[open] summary{margin-bottom:8px}
 #render-dialog .render-advanced .navigation-hint{display:block;margin-top:8px}
+
+/* Render move handles are portalled above the free Sketch tool buttons;
+ * the separate toolbar drag grip remains above these handle bars. */
+.floating-render-handle-layer .float-window-handle{
+  position:fixed;right:auto;width:auto;touch-action:none;pointer-events:auto;
+}
+.floating-render-handle-layer .float-window-handle:not([hidden]){display:flex}

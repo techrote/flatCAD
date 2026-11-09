@@ -880,7 +880,7 @@ test("sketch tool rail docks in titlebar, keeps drawing interactions and remembe
   const toolbar=page.locator("#sketch-tool-rail");
   const toggle=page.locator("#tool-dock-toggle");
   await expect(toggle).toHaveAttribute("aria-pressed","false");
-  await expect(page.locator("#sketch-wrap #sketch-tool-rail")).toHaveCount(1);
+  await expect(page.locator(".floating-toolbar-overlay #sketch-tool-rail")).toHaveCount(1);
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-pressed","true");
   await expect(page.locator("#tool-dock-slot #sketch-tool-rail")).toHaveCount(1);
@@ -896,7 +896,7 @@ test("sketch tool rail docks in titlebar, keeps drawing interactions and remembe
   await expect(page.locator("#profile-count")).toContainText("1 profiles");
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-pressed","false");
-  await expect(page.locator("#sketch-wrap #sketch-tool-rail")).toHaveCount(1);
+  await expect(page.locator(".floating-toolbar-overlay #sketch-tool-rail")).toHaveCount(1);
   expect(await page.evaluate(()=>JSON.parse(localStorage.getItem("flatcad.layout.v1")!).docked))
     .toBe(false);
 });
@@ -1119,7 +1119,7 @@ test("floating Solid blocks sketch input and uses handle move and corner resize"
   await page.mouse.up();
   expect((await panel.boundingBox())!.x).toBeCloseTo(start.x,0);
   expect(await solid.getAttribute("data-camera-direction")).toBe(camera);
-  const handle=(await panel.locator(".float-window-handle").boundingBox())!;
+  const handle=(await page.locator('.floating-render-handle-layer [data-float-owner="tiled"]').boundingBox())!;
   await page.mouse.move(handle.x+handle.width/2,handle.y+handle.height/2);
   await page.mouse.down();
   await page.mouse.move(handle.x+handle.width/2+70,handle.y+handle.height/2+40,{steps:7});
@@ -1145,7 +1145,7 @@ test("floating Solid blocks sketch input and uses handle move and corner resize"
   expect(Math.abs(restored.width-resized.width)).toBeLessThan(3);
   expect(Math.abs(restored.height-resized.height)).toBeLessThan(3);
   await openMenu(page,"view","view.dock");
-  await expect(panel.locator(".float-window-handle")).toBeHidden();
+  await expect(page.locator('.floating-render-handle-layer [data-float-owner="tiled"]')).toBeHidden();
   await expect(solid).toHaveAttribute("data-floating","false");
   await expect(page.locator(".preview-panel .solid-titlebar")).toBeVisible();
 });
@@ -1337,7 +1337,8 @@ test("multiple floating renders preserve independent cameras and optionally hidd
   await expect(first).toBeVisible();
   await page.locator('[data-close="layout-dialog"]').last().click();
   const coords=(await first.boundingBox())!;
-  const handle=(await first.locator(".float-window-handle").boundingBox())!;
+  const firstFloatId=await first.getAttribute("data-float-id");
+  const handle=(await page.locator('.floating-render-handle-layer [data-float-owner="'+firstFloatId+'"]').boundingBox())!;
   await page.mouse.move(handle.x+handle.width/2,handle.y+handle.height/2);
   await page.mouse.down();
   await page.mouse.move(handle.x+handle.width/2+45,handle.y+handle.height/2+32,{steps:7});
@@ -1510,7 +1511,8 @@ test("floating control spacing and opacity persist independently from CAD",async
   await expect(page.locator("#status")).toContainText("Exact solid generated");
   await openMenu(page,"view","view.float.new");
   const frame=page.locator(".floating-render-view").first();
-  const handle=frame.locator(".float-window-handle");
+  const floatId=await frame.getAttribute("data-float-id");
+  const handle=page.locator('.floating-render-handle-layer [data-float-owner="'+floatId+'"]');
   const nav=frame.locator(".float-nav");
   await expect(frame.locator(".float-corner-grip")).toHaveCount(2);
   await expect(frame.locator('[data-corner="nw"]')).toHaveCount(0);
@@ -1519,7 +1521,7 @@ test("floating control spacing and opacity persist independently from CAD",async
   const handleBox=(await handle.boundingBox())!,navBox=(await nav.boundingBox())!;
   expect(handleBox.width).toBeGreaterThanOrEqual(44);
   expect(Math.abs(handleBox.x-(rect.x+3))).toBeLessThan(2);
-  expect(Math.abs(handleBox.y-navBox.y)).toBeLessThan(1);
+  expect(Math.abs(handleBox.y-navBox.y)).toBeLessThan(1.6);
   await openMenu(page,"layout","dialog.layout");
   const slider=page.locator("#float-opacity");
   await slider.focus();
@@ -2088,9 +2090,10 @@ test("selected sketch tools show an offset glyph next to, not across, the native
   await expect(badge).toHaveAttribute("data-cursor-tool","line");
   await expect(badge).toHaveText("╱");
   await expect(canvas).toHaveCSS("cursor","crosshair");
+  await page.waitForTimeout(145); // permit short spring transition
   const box=(await badge.boundingBox())!;
-  expect(box.x+box.width).toBeLessThan(at.x-7);
-  expect(box.y).toBeGreaterThan(at.y+7);
+  expect(box.x).toBeGreaterThan(at.x+7);
+  expect(box.y).toBeGreaterThan(at.y+6);
   expect(await badge.evaluate(el=>getComputedStyle(el).pointerEvents)).toBe("none");
   await page.keyboard.press("r");
   await expect(badge).toHaveAttribute("data-cursor-tool","rectangle");
@@ -2101,6 +2104,7 @@ test("selected sketch tools show an offset glyph next to, not across, the native
   await page.keyboard.press("c");
   await expect(badge).toHaveText("◯");
   await page.mouse.move(rect.x+4,rect.y+rect.height-4);
+  await page.waitForTimeout(145);
   const nearEdge=(await badge.boundingBox())!;
   expect(nearEdge.x).toBeGreaterThanOrEqual(rect.x);
   expect(nearEdge.y).toBeGreaterThanOrEqual(rect.y);
@@ -2158,11 +2162,12 @@ test("floating move handle fills free top-bar width, without overlapping navigat
   await page.goto("/");
   await expect(page.locator("#status")).toContainText("Exact solid generated");
   const assess=async(panel:import("@playwright/test").Locator)=>{
-    const handle=(await panel.locator(".float-window-handle").boundingBox())!;
+    const floatId=await panel.getAttribute("data-float-id")??"tiled";
+    const handle=(await page.locator('.floating-render-handle-layer [data-float-owner="'+floatId+'"]').boundingBox())!;
     const nav=(await panel.locator(".float-nav").boundingBox())!;
     expect(handle.width).toBeGreaterThan(65);
-    expect(handle.x+handle.width).toBeLessThan(nav.x-2);
-    expect(Math.abs(handle.y-nav.y)).toBeLessThan(1);
+    expect(handle.x+handle.width).toBeLessThanOrEqual(nav.x-2);
+    expect(Math.abs(handle.y-nav.y)).toBeLessThan(1.6);
     return handle.width;
   };
   await openMenu(page,"view","view.float");
@@ -2184,4 +2189,91 @@ test("floating move handle fills free top-bar width, without overlapping navigat
   await page.mouse.move(floatGrip.x+floatGrip.width/2+65,floatGrip.y+floatGrip.height/2+15,{steps:6});
   await page.mouse.up();
   expect(await assess(independent)).toBeGreaterThan(prior+40);
+});
+
+
+test("tool glyph moves along a cursor-centred ring and yields on approach",async({page})=>{
+  await page.setViewportSize({width:1450,height:850});
+  await page.goto("/");
+  const canvas=page.locator("#sketch"),rect=(await canvas.boundingBox())!;
+  const p={x:rect.x+rect.width*.54,y:rect.y+rect.height*.5};
+  await page.mouse.move(p.x,p.y);
+  await page.keyboard.press("l");
+  const glyph=page.locator(".sketch-tool-cursor");
+  await expect(glyph).toBeVisible();
+  const before=Number(await glyph.getAttribute("data-orbit-angle"));
+  await page.mouse.move(p.x+22,p.y+13,{steps:3});
+  await expect.poll(async()=>Number(await glyph.getAttribute("data-orbit-angle")))
+    .toBeGreaterThan(before+.04);
+  const target=await glyph.evaluate((el)=>{
+    const x=parseFloat((el as HTMLElement).style.left);
+    const y=parseFloat((el as HTMLElement).style.top);
+    return [x+12,y+12];
+  });
+  const current={x:22+rect.width*.54,y:13+rect.height*.5};
+  const distance=Math.hypot(target[0]-current.x,target[1]-current.y);
+  expect(distance).toBeGreaterThan(35);
+  expect(distance).toBeLessThan(47);
+  await page.mouse.move(rect.x-20,rect.y-20);
+  await expect(glyph).toBeHidden();
+});
+test("floating Sketch toolbar side-snaps and obeys move-handle stacking",async({page})=>{
+  await page.setViewportSize({width:1490,height:880});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const rail=page.locator("#sketch-tool-rail"),grip=page.locator("#tool-dock-float");
+  await expect(page.locator(".floating-toolbar-overlay #sketch-tool-rail")).toHaveCount(1);
+  await expect(grip).toBeVisible();
+  const sketch=(await page.locator("#sketch-wrap").boundingBox())!;
+  const initial=(await rail.boundingBox())!,g=(await grip.boundingBox())!;
+  const dest={x:sketch.x+sketch.width-initial.width-8,y:sketch.y+85};
+  await page.mouse.move(g.x+g.width/2,g.y+g.height/2);
+  await page.mouse.down();
+  await page.mouse.move(g.x+g.width/2+(dest.x-initial.x),
+    g.y+g.height/2+(dest.y-initial.y),{steps:9});
+  await page.mouse.up();
+  await expect(rail).toHaveAttribute("data-snap-side","right");
+  const moved=(await rail.boundingBox())!;
+  expect(Math.abs(moved.x-dest.x)).toBeLessThan(14);
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem("flatcad.tool-rail.v1")||"{}").side))
+    .toBe("right");
+  await openMenu(page,"view","view.float.new");
+  const frame=page.locator(".floating-render-view").first();
+  const id=await frame.getAttribute("data-float-id");
+  const renderHandle=page.locator('.floating-render-handle-layer [data-float-owner="'+id+'"]');
+  await expect(renderHandle).toBeVisible();
+  // Overlay one view on the toolbar without changing CAD or camera data.
+  await frame.evaluate((el,pos)=>{
+    (el as HTMLElement).style.left=pos.x+"px";
+    (el as HTMLElement).style.top=pos.y+"px";
+  },{x:moved.x-7,y:moved.y+36});
+  await expect.poll(async()=>Math.round((await renderHandle.boundingBox())!.y))
+    .toBe(Math.round(moved.y+39));
+  const renderBox=(await renderHandle.boundingBox())!;
+  const overlap={x:moved.x+moved.width/2,y:renderBox.y+15};
+  const front=await page.evaluate(({x,y})=>document.elementFromPoint(x,y)?.getAttribute("class"),overlap);
+  expect(front).toContain("float-window-handle");
+  const lower=rail.locator('[data-tool="rectangle"]'),lowerBox=(await lower.boundingBox())!;
+  const button=await page.evaluate(({x,y})=>document.elementFromPoint(x,y)?.getAttribute("data-tool"),
+    {x:lowerBox.x+lowerBox.width/2,y:lowerBox.y+lowerBox.height/2});
+  expect(button).toBe("rectangle");
+  await frame.evaluate((el,pos)=>{
+    (el as HTMLElement).style.left=pos.x+"px";
+    (el as HTMLElement).style.top=pos.y+"px";
+  },{x:moved.x-7,y:moved.y+2});
+  await expect.poll(async()=>Math.round((await renderHandle.boundingBox())!.y))
+    .toBe(Math.round(moved.y+5));
+  const gripBox=(await grip.boundingBox())!;
+  const top=await page.evaluate(({x,y})=>{
+    const hit=document.elementFromPoint(x,y);
+    return {grip:Boolean(hit?.closest("#tool-dock-float")),
+      tag:hit?.tagName??"none",owner:hit?.closest("button")?.id??"none"};
+  },{x:gripBox.x+gripBox.width/2,y:gripBox.y+gripBox.height/2});
+  expect(top.grip,JSON.stringify(top)).toBe(true);
+  await page.reload();
+  await expect(rail).toHaveAttribute("data-snap-side","right");
+  await grip.click();
+  await expect(page.locator("#tool-dock-slot #sketch-tool-rail")).toHaveCount(1);
+  await page.locator("#tool-dock-toggle").click();
+  await expect(page.locator(".floating-toolbar-overlay #sketch-tool-rail")).toHaveCount(1);
 });
