@@ -13,3 +13,12 @@ The subtle floating border marks the area within which the camera clips the disp
 The primary validation gates are: independent camera direction (changing one does not affect others); two or three visible real Solid outputs with a single native model; face-pick Start Z / Depth through a floating renderer; pixel hit-based input gating; hiding and restoring the tiled Solid independently; clean deletion and bounded preference migration; and overlay/print/export correctness. Exact STEP validity is not affected by the number of display cameras.
 
 Never add unsolicited onboarding, overlaid text labels or perpetual performance-costly effects to support this workflow.
+
+### Full-width move bar
+
+Both the original floating Solid tile and independent floating viewports use
+a top-left move bar that stretches to occupy the free row *beside* the
+navigation icons. This is UI chrome only: the bar has its own drag/keyboard
+handling and does not intercept navigation controls or change a solid's
+camera or B-rep. The bar grows with the frame width; the 3px gap and
+corner-radius alignment are retained.

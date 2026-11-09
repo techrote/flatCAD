@@ -495,10 +495,16 @@
  * controls are always over the CAD canvas, never part of the B-rep scene. */
 .float-window-handle,.float-corner-grip{position:absolute;z-index:45;
   pointer-events:auto;touch-action:none;user-select:none}
-.float-window-handle{display:none;top:3px;left:3px;width:46px;height:35px;
+/* Navigation occupies 95px (3 actions) or 125px (4 actions), including
+ * 3px gaps, padding and borders. Reserve 3px around it while the move
+ * handle fills all remaining horizontal space, even after resizing. */
+.float-window-handle{display:none;top:3px;left:3px;right:131px;width:auto;height:35px;
   padding:0;align-items:center;justify-content:center;
   border:1px solid #6088ad;border-radius:7px;background:#14283bdc;
   color:#dceefb;cursor:move}
+.workbench-layout.float-solid .preview-panel .float-window-handle{
+  right:101px;
+}
 .float-window-handle svg{width:23px;height:23px;pointer-events:none}
 .float-window-handle:hover,.float-window-handle:focus-visible{
   background:#345a78;outline:1px solid #9ecfff}

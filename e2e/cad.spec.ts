@@ -2072,3 +2072,116 @@ test("nonmodal Render keyboard focus keeps CAD shortcuts live without a sketch c
   await page.keyboard.press("c");
   await tool("circle");
 });
+
+
+test("selected sketch tools show an offset glyph next to, not across, the native crosshair",async({page})=>{
+  await page.setViewportSize({width:1450,height:870});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const canvas=page.locator("#sketch");
+  const rect=(await canvas.boundingBox())!;
+  const at={x:rect.x+rect.width*.55,y:rect.y+rect.height*.42};
+  await page.mouse.move(at.x,at.y);
+  await page.keyboard.press("l");
+  const badge=page.locator(".sketch-tool-cursor");
+  await expect(badge).toBeVisible();
+  await expect(badge).toHaveAttribute("data-cursor-tool","line");
+  await expect(badge).toHaveText("╱");
+  await expect(canvas).toHaveCSS("cursor","crosshair");
+  const box=(await badge.boundingBox())!;
+  expect(box.x+box.width).toBeLessThan(at.x-7);
+  expect(box.y).toBeGreaterThan(at.y+7);
+  expect(await badge.evaluate(el=>getComputedStyle(el).pointerEvents)).toBe("none");
+  await page.keyboard.press("r");
+  await expect(badge).toHaveAttribute("data-cursor-tool","rectangle");
+  await expect(badge).toHaveText("▭");
+  await page.keyboard.press("Shift+r");
+  await expect(badge).toHaveAttribute("data-cursor-tool","centerRectangle");
+  await expect(badge).toHaveText("▣");
+  await page.keyboard.press("c");
+  await expect(badge).toHaveText("◯");
+  await page.mouse.move(rect.x+4,rect.y+rect.height-4);
+  const nearEdge=(await badge.boundingBox())!;
+  expect(nearEdge.x).toBeGreaterThanOrEqual(rect.x);
+  expect(nearEdge.y).toBeGreaterThanOrEqual(rect.y);
+  expect(nearEdge.x+nearEdge.width).toBeLessThanOrEqual(rect.x+rect.width);
+  expect(nearEdge.y+nearEdge.height).toBeLessThanOrEqual(rect.y+rect.height);
+  await page.mouse.move(rect.x-15,rect.y-15);
+  await expect(badge).toBeHidden();
+  await page.mouse.move(at.x,at.y);
+  await expect(badge).toBeVisible();
+  await page.keyboard.press("v");
+  await expect(badge).toBeHidden();
+  await expect(canvas).toHaveCSS("cursor","default");
+});
+test("Keybinds top menu shows live chords and reassigns through existing editor",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const entry=page.locator('[data-menu="keybinds"]');
+  await expect(entry).toBeVisible();
+  await entry.click();
+  const popup=page.locator("#menu-popover");
+  await expect(popup).toBeVisible();
+  await expect(popup.locator('[data-command="keybind.reassign.tool.rectangle"]'))
+    .toContainText("Rectangle");
+  await expect(popup.locator('[data-command="keybind.reassign.tool.rectangle"] .menu-shortcut'))
+    .toHaveText("R");
+  const popBox=(await popup.boundingBox())!;
+  expect(popBox.x).toBeGreaterThanOrEqual(0);
+  expect(popBox.x+popBox.width).toBeLessThanOrEqual(1450);
+  await popup.locator('[data-command="keybind.reassign.tool.rectangle"]').click();
+  await expect(page.locator("#shortcuts-dialog")).toBeVisible();
+  await expect(page.locator('[data-action="tool.rectangle"]')).toContainText("Press keys");
+  await page.keyboard.press("t");
+  await expect(page.locator('[data-action="tool.rectangle"]')).toContainText("T");
+  await page.locator('[data-close="shortcuts-dialog"]').last().click();
+  await entry.click();
+  await expect(popup.locator('[data-command="keybind.reassign.tool.rectangle"] .menu-shortcut'))
+    .toHaveText("T");
+  await popup.locator('[data-command="keybind.reassign.tool.rectangle"]').click();
+  // Closing before assigning must not leave the global recorder active.
+  await page.locator('[data-close="shortcuts-dialog"]').last().click();
+  await page.keyboard.press("t");
+  await expect(page.locator('[data-tool="rectangle"]')).toHaveClass(/active/);
+  const stored=await page.evaluate(()=>
+    JSON.parse(localStorage.getItem("flatcad.preferences.v1")||"{}"));
+  expect(stored.shortcuts["tool.rectangle"]).toBe("KeyT");
+  await page.reload();
+  await page.locator('[data-menu="keybinds"]').click();
+  await expect(popup.locator('[data-command="keybind.reassign.tool.rectangle"] .menu-shortcut'))
+    .toHaveText("T");
+  await popup.locator('[data-command="dialog.shortcuts"]').click();
+  await expect(page.locator("#shortcuts-dialog")).toBeVisible();
+});
+test("floating move handle fills free top-bar width, without overlapping navigation",async({page})=>{
+  await page.setViewportSize({width:1440,height:850});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  const assess=async(panel:import("@playwright/test").Locator)=>{
+    const handle=(await panel.locator(".float-window-handle").boundingBox())!;
+    const nav=(await panel.locator(".float-nav").boundingBox())!;
+    expect(handle.width).toBeGreaterThan(65);
+    expect(handle.x+handle.width).toBeLessThan(nav.x-2);
+    expect(Math.abs(handle.y-nav.y)).toBeLessThan(1);
+    return handle.width;
+  };
+  await openMenu(page,"view","view.float");
+  const docked=page.locator(".preview-panel");
+  const before=await assess(docked);
+  const grip=(await docked.locator('[data-corner="se"]').boundingBox())!;
+  await page.mouse.move(grip.x+grip.width/2,grip.y+grip.height/2);
+  await page.mouse.down();
+  await page.mouse.move(grip.x+grip.width/2+70,grip.y+grip.height/2+20,{steps:6});
+  await page.mouse.up();
+  expect(await assess(docked)).toBeGreaterThan(before+45);
+  await openMenu(page,"view","view.float.new");
+  const independent=page.locator(".floating-render-view").first();
+  await expect(independent.locator(".float-nav-action")).toHaveCount(4);
+  const prior=await assess(independent);
+  const floatGrip=(await independent.locator('[data-corner="se"]').boundingBox())!;
+  await page.mouse.move(floatGrip.x+floatGrip.width/2,floatGrip.y+floatGrip.height/2);
+  await page.mouse.down();
+  await page.mouse.move(floatGrip.x+floatGrip.width/2+65,floatGrip.y+floatGrip.height/2+15,{steps:6});
+  await page.mouse.up();
+  expect(await assess(independent)).toBeGreaterThan(prior+40);
+});
