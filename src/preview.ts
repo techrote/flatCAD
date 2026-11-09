@@ -45,13 +45,11 @@ export class Preview {
   private bufferWidth=0;
   private bufferHeight=0;
   private floating=false;
-  private floatDrag:{pointerId:number;startX:number;startY:number;x:number;y:number;moved:boolean}|null=null;
   private disposed=false;
   private renderCount=0;
   private composer:EffectComposer|null=null;
   private ssaoPass:SSAOPass|null=null;
   private renderSettings:RenderSettings={...DEFAULT_RENDER_SETTINGS};
-  private onFloatMove:((dx:number,dy:number)=>void)|null=null;
 
   constructor(private readonly container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -74,46 +72,8 @@ export class Preview {
     // Capture is necessary: OrbitControls reads the selected mouse action on
     // pointerdown. Changing it later (in a bubbling listener) is too late.
     const surface = this.renderer.domElement;
-    // Float mode is intentionally not a window: the rendered solid itself
-    // is the grab surface, and the transparent pixels pass pointer input to
-    // the Sketch beneath it. Orbit navigation is permitted only on solid hits.
-    surface.addEventListener("pointerdown",event=>{
-      if(!this.floating)return;
-      if(!this.hitVisibleSolid(event.clientX,event.clientY)){
-        event.preventDefault();event.stopImmediatePropagation();
-        return;
-      }
-      if(event.button!==0)return; // MMB/RMB retain configured CAD navigation.
-      // Short left clicks remain available for face elevation selection.
-      // Only begin moving the floating view beyond four CSS pixels.
-      this.floatDrag={pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,
-        x:event.clientX,y:event.clientY,moved:false};
-      surface.setPointerCapture(event.pointerId);
-    },{capture:true});
-    surface.addEventListener("pointermove",event=>{
-      const drag=this.floatDrag;
-      if(!drag||drag.pointerId!==event.pointerId)return;
-      const dx=event.clientX-drag.x,dy=event.clientY-drag.y;
-      if(!drag.moved&&Math.hypot(event.clientX-drag.startX,
-        event.clientY-drag.startY)<=4)return;
-      drag.moved=true;
-      this.container.dataset.floatDragging="true";
-      drag.x=event.clientX;drag.y=event.clientY;
-      this.onFloatMove?.(dx,dy);
-      event.preventDefault();event.stopImmediatePropagation();
-    },{capture:true});
-    const endFloat=(event:PointerEvent)=>{
-      const drag=this.floatDrag;
-      if(!drag||drag.pointerId!==event.pointerId)return;
-      this.floatDrag=null;
-      delete this.container.dataset.floatDragging;
-      if(surface.hasPointerCapture(event.pointerId))surface.releasePointerCapture(event.pointerId);
-      this.updateFloatHit(event.clientX,event.clientY);
-      // Preserve the normal pointerup → face pick when the gesture was a click.
-      if(drag.moved){event.preventDefault();event.stopImmediatePropagation();}
-    };
-    surface.addEventListener("pointerup",endFloat,{capture:true});
-    surface.addEventListener("pointercancel",endFloat,{capture:true});
+    // Floating viewport interiors own all input, including empty pixels.
+    // Window movement/resizing occurs exclusively on the separate frame grips.
     document.addEventListener("pointermove",this.onDocumentPointerMove,{capture:true});
     surface.addEventListener("pointerdown", event => {
       const action = dragAction(this.navigation, event.button, {
@@ -200,26 +160,10 @@ export class Preview {
     this.requestRender();
   }
 
-  /** Hit-test only the current displayed B-rep-derived solid, not empty
-   * backing pixels, overlay grid or pointer-affordance spheres. */
-  private hitVisibleSolid(clientX:number,clientY:number):boolean{
-    const target=this.object?.children[0];
-    if(!(target instanceof THREE.Mesh))return false;
-    const bounds=this.renderer.domElement.getBoundingClientRect();
-    if(bounds.width<2||bounds.height<2||clientX<bounds.left||clientX>bounds.right||
-      clientY<bounds.top||clientY>bounds.bottom)return false;
-    this.pickPoint.set(2*(clientX-bounds.left)/bounds.width-1,
-      1-2*(clientY-bounds.top)/bounds.height);
-    this.camera.updateMatrixWorld(true);
-    this.scene.updateMatrixWorld(true);
-    this.raycaster.setFromCamera(this.pickPoint,this.camera);
-    return this.raycaster.intersectObject(target,false).length>0;
-  }
   private updateFloatHit(x:number,y:number):void{
     if(!this.floating)return;
-    const hit=Boolean(this.floatDrag)||this.hitVisibleSolid(x,y);
-    this.renderer.domElement.style.pointerEvents=hit?"auto":"none";
-    this.container.dataset.floatHover=String(hit);
+    const r=this.renderer.domElement.getBoundingClientRect();
+    this.container.dataset.floatHover=String(x>=r.left&&x<r.right&&y>=r.top&&y<r.bottom);
   }
   private readonly onDocumentPointerMove=(event:PointerEvent):void=>{
     this.updateFloatHit(event.clientX,event.clientY);
@@ -230,14 +174,12 @@ export class Preview {
     this.referenceGrid.visible=!enabled;
     this.axesHelper.visible=!enabled;
     this.renderer.setClearColor(0x0b1220,enabled?0:1);
-    this.renderer.domElement.style.pointerEvents=enabled?"none":"auto";
+    this.renderer.domElement.style.pointerEvents="auto";
+    if(enabled)this.container.dataset.floatHitPolicy="viewport";
+    else delete this.container.dataset.floatHitPolicy;
     this.container.dataset.floating=String(enabled);
     this.container.dataset.floatHover="false";
-    if(!enabled)this.floatDrag=null;
     this.requestRender();
-  }
-  setFloatDragHandler(handler:((dx:number,dy:number)=>void)|null):void{
-    this.onFloatMove=handler;
   }
   private toMouseAction(action:"none"|"pan"|"orbit"|"dolly"):number {
     switch(action){
@@ -701,7 +643,6 @@ export class Preview {
     clearTimeout(this.resizeTimer);
     this.resizeObserver.disconnect();
     document.removeEventListener("pointermove",this.onDocumentPointerMove,{capture:true});
-    this.onFloatMove=null;
     this.orbit.dispose();
     this.onFacePicked=null;
     this.onSurfaceHover=null;

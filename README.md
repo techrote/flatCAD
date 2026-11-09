@@ -56,10 +56,11 @@ Geometric constraint solving, standalone arcs, automatic region extraction from 
 
 ## Experimental UI: floating Solid and wheel fields
 
-The View menu and Workspace tiles menu provide a transparent floating Solid mode. Drag the rendered solid itself with the left button; configured CAD navigation controls respond only when initially hovering the actual rendered object. The background of the floating preview remains click-through, preserving access to Sketch. Floating position is stored in layout preferences, not the CAD document. Dock Solid restores the conventional tile. Numeric properties can be focused and adjusted with the mouse wheel while hovered (Shift for fine, Ctrl for coarse steps). In the feature timeline, clicking a Cut briefly displays its exact translucent cutting tool for 867 ms; the history selection itself remains active until changed. These controls are opt-in and do not add onboarding surfaces.
+The View and Layout menus provide a floating Solid mode plus up to three independent floating CAD cameras. The floating window is visually transparent but **the whole rectangular viewport blocks interaction with the Sketch beneath it**, including empty pixels. Its camera uses exactly the same configured CAD mouse controls as the docked Solid (Fusion: middle-button pan, Shift+middle-button orbit, wheel zoom); left-click horizontal faces can still populate a focused Z/Depth field. **Drag the small rectangular top-left handle to move a floating viewport**, not the rendered object. Drag any of its four corner grips to resize. Frame positions and sizes are stored in UI preferences independently of the CAD document and restored after reload. Dock Solid restores the conventional tile. Numeric properties can be adjusted by hovering and scrolling (Shift for fine, Ctrl for coarse steps). Clicking a timeline Cut briefly displays its exact translucent cutter for 867 ms.
 
 ## Documents
 
+- [Independent floating CAD render views and visibility](docs/ADR-0009-FLOAT-RENDER-VIEWS.md)
 - [Owner-approved product vision and agent design contract](docs/PRODUCT-VISION.md)
 - [Experimental named parameters and formula data model](docs/ADR-0007-NAMED-PARAMETERS.md)
 - [Canvas-first UX and shortcuts](docs/UX-DIRECT-INTERACTION.md)

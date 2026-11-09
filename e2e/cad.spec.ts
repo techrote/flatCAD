@@ -1089,43 +1089,56 @@ test("portrait history retains newest-first even after switching out of timeline
     .toEqual(["Cut · Circle 2","Cut · Circle 1","Extrude · Rectangle 1"]);
 });
 
-test("floating solid has transparent background, hit-based navigation, and draggable persisted position",async({page})=>{
+test("floating Solid blocks sketch input and uses handle move and corner resize",async({page})=>{
   await page.setViewportSize({width:1440,height:820});
   await page.goto("/");
   await expect(page.locator("#status")).toContainText("Exact solid generated");
   await openMenu(page,"view","view.float");
-  const workbench=page.locator("#workbench-layout");
-  const solid=page.locator("#preview");
-  await expect(workbench).toHaveClass(/float-solid/);
-  await expect(solid).toHaveAttribute("data-floating","true");
+  const layout=page.locator("#workbench-layout"),solid=page.locator("#preview");
   const panel=page.locator(".preview-panel"),canvas=page.locator("#preview canvas");
-  const initial=await panel.boundingBox();
-  expect(initial).not.toBeNull();
-  expect(await panel.evaluate(el=>getComputedStyle(el).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
-  // Transparent corners are pass-through, not an invisible OrbitControls window.
-  await page.mouse.move(initial!.x+2,initial!.y+2);
-  await expect(solid).toHaveAttribute("data-float-hover","false");
-  await expect(canvas).toHaveCSS("pointer-events","none");
-  const cx=initial!.x+initial!.width/2,cy=initial!.y+initial!.height/2;
-  await page.mouse.move(cx,cy);
-  await expect(solid).toHaveAttribute("data-float-hover","true");
-  const before=await solid.getAttribute("data-camera-direction");
+  await expect(layout).toHaveClass(/float-solid/);
+  await expect(solid).toHaveAttribute("data-float-hit-policy","viewport");
+  await expect(canvas).toHaveCSS("pointer-events","auto");
+  const start=(await panel.boundingBox())!;
+  expect(await panel.evaluate(el=>getComputedStyle(el).backgroundColor))
+    .toBe("rgba(0, 0, 0, 0)");
+  const empty=[start.x+start.width*.12,start.y+start.height*.78];
+  const hit=await page.evaluate(([x,y])=>document.elementFromPoint(x,y)?.tagName,empty);
+  expect(hit).toBe("CANVAS");
+  const camera=await solid.getAttribute("data-camera-direction");
+  await page.mouse.move(start.x+start.width*.5,start.y+start.height*.5);
   await page.mouse.down();
-  await page.mouse.move(cx+80,cy+45,{steps:7});
+  await page.mouse.move(start.x+start.width*.5+60,start.y+start.height*.5+35,{steps:7});
   await page.mouse.up();
-  const moved=await panel.boundingBox();
-  expect(moved!.x).toBeGreaterThan(initial!.x+60);
-  expect(moved!.y).toBeGreaterThan(initial!.y+30);
-  expect(await solid.getAttribute("data-camera-direction")).toBe(before);
-  const layout=await page.evaluate(()=>JSON.parse(localStorage.getItem("flatcad.layout.v1")!));
-  expect(layout.tileMode).toBe("float");
-  expect(layout.floatX).toBeGreaterThan(.58);
+  expect((await panel.boundingBox())!.x).toBeCloseTo(start.x,0);
+  expect(await solid.getAttribute("data-camera-direction")).toBe(camera);
+  const handle=(await panel.locator(".float-window-handle").boundingBox())!;
+  await page.mouse.move(handle.x+handle.width/2,handle.y+handle.height/2);
+  await page.mouse.down();
+  await page.mouse.move(handle.x+handle.width/2+70,handle.y+handle.height/2+40,{steps:7});
+  await page.mouse.up();
+  const moved=(await panel.boundingBox())!;
+  expect(moved.x).toBeGreaterThan(start.x+50);
+  expect(moved.y).toBeGreaterThan(start.y+25);
+  const grip=(await panel.locator('[data-corner="se"]').boundingBox())!;
+  await page.mouse.move(grip.x+grip.width/2,grip.y+grip.height/2);
+  await page.mouse.down();
+  await page.mouse.move(grip.x+grip.width/2+85,grip.y+grip.height/2+48,{steps:7});
+  await page.mouse.up();
+  const resized=(await panel.boundingBox())!;
+  expect(resized.width).toBeGreaterThan(moved.width+60);
+  expect(resized.height).toBeGreaterThan(moved.height+30);
+  const prefs=await page.evaluate(()=>JSON.parse(localStorage.getItem("flatcad.layout.v1")!));
+  expect(prefs.floatW).toBeGreaterThan(380);
   await page.reload();
-  await expect(workbench).toHaveClass(/float-solid/);
-  const persisted=await panel.boundingBox();
-  expect(persisted!.x).toBeCloseTo(moved!.x,0);
+  await expect(layout).toHaveClass(/float-solid/);
+  const restored=(await panel.boundingBox())!;
+  expect(Math.abs(restored.x-resized.x)).toBeLessThan(3);
+  expect(Math.abs(restored.y-resized.y)).toBeLessThan(3);
+  expect(Math.abs(restored.width-resized.width)).toBeLessThan(3);
+  expect(Math.abs(restored.height-resized.height)).toBeLessThan(3);
   await openMenu(page,"view","view.dock");
-  await expect(workbench).not.toHaveClass(/float-solid/);
+  await expect(panel.locator(".float-window-handle")).toBeHidden();
   await expect(solid).toHaveAttribute("data-floating","false");
   await expect(page.locator(".preview-panel .solid-titlebar")).toBeVisible();
 });
@@ -1280,4 +1293,201 @@ test("View/Layout/Render menu separation and optional AO/SSAA preserve source ge
   await page.reload();
   await expect(page.locator("#preview")).toHaveAttribute("data-ao-enabled","true");
   await expect(page.locator("#preview")).toHaveAttribute("data-supersample","1.5");
+});
+
+test("multiple floating renders preserve independent cameras and optionally hidden tiled Solid",async({page},testInfo)=>{
+  await page.setViewportSize({width:1500,height:860});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await openMenu(page,"view","view.float.new");
+  await openMenu(page,"view","view.float.new");
+  const views=page.locator("#floating-views-layer .floating-render-view");
+  await expect(views).toHaveCount(2);
+  await expect(views.locator(".floating-render-canvas[data-rendered-solid=true]"))
+    .toHaveCount(2);
+  await expect(page.locator(".preview-panel .solid-titlebar")).toBeVisible();
+  const first=views.nth(0),second=views.nth(1);
+  await first.locator('[data-nav="underground"]').click();
+  await expect(first.locator(".floating-render-canvas")).toHaveAttribute("data-home-mode","underground");
+  // The second view overlaps the first view's centre. Activating the first
+  // navigation tile must foreground its canvas before pointer interactions.
+  const firstZ=await first.evaluate(el=>Number((el as HTMLElement).style.zIndex));
+  const secondZ=await second.evaluate(el=>Number((el as HTMLElement).style.zIndex));
+  expect(firstZ).toBeGreaterThan(secondZ);
+  const d1=(await first.locator(".floating-render-canvas").getAttribute("data-camera-direction"))!
+    .split(",").map(Number);
+  const d2=(await second.locator(".floating-render-canvas").getAttribute("data-camera-direction"))!
+    .split(",").map(Number);
+  expect(d1[2]).toBeLessThan(0);
+  expect(d2[2]).toBeGreaterThan(0);
+  await page.screenshot({path:testInfo.outputPath("independent-floating-cameras.png")});
+  await openMenu(page,"layout","dialog.layout");
+  await page.locator("#tiled-solid-visible").uncheck();
+  await expect(page.locator("#workbench-layout")).toHaveClass(/tiled-solid-hidden/);
+  await expect(page.locator(".preview-panel")).toBeHidden();
+  await expect(views).toHaveCount(2);
+  await expect(first).toBeVisible();
+  await page.locator('[data-close="layout-dialog"]').last().click();
+  const coords=(await first.boundingBox())!;
+  const handle=(await first.locator(".float-window-handle").boundingBox())!;
+  await page.mouse.move(handle.x+handle.width/2,handle.y+handle.height/2);
+  await page.mouse.down();
+  await page.mouse.move(handle.x+handle.width/2+45,handle.y+handle.height/2+32,{steps:7});
+  await page.mouse.up();
+  const after=(await first.boundingBox())!;
+  expect(after.x).toBeGreaterThan(coords.x+20);
+  expect(after.y).toBeGreaterThan(coords.y+15);
+  await page.screenshot({path:testInfo.outputPath("dragged-view-and-hidden-tile.png")});
+  await page.reload();
+  await expect(views).toHaveCount(2);
+  // Foreground identity must also persist: an overlapping sibling must not
+  // swallow the reloaded active view's Close navigation control.
+  const restoredFirstZ=await views.first().evaluate(el=>Number((el as HTMLElement).style.zIndex));
+  const restoredSecondZ=await views.nth(1).evaluate(el=>Number((el as HTMLElement).style.zIndex));
+  expect(restoredFirstZ).toBeGreaterThan(restoredSecondZ);
+  const restored=(await views.first().boundingBox())!;
+  // Drag-end persistence is separate from the CAD document and must survive
+  // reload without synchronous localStorage writes during pointermove.
+  expect(Math.abs(restored.x-after.x)).toBeLessThan(3);
+  expect(Math.abs(restored.y-after.y)).toBeLessThan(3);
+  await expect(page.locator(".preview-panel")).toBeHidden();
+  await views.first().locator('[data-nav="close"]').click();
+  await expect(views).toHaveCount(1);
+  await openMenu(page,"view","view.solid.show");
+  await expect(page.locator(".preview-panel")).toBeVisible();
+  await expect(views).toHaveCount(1);
+});
+
+test("independent floating canvas blocks background and preserves CAD navigation controls",async({page})=>{
+  await page.setViewportSize({width:1440,height:820});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await openMenu(page,"view","view.float.new");
+  const frame=page.locator("#floating-views-layer .floating-render-view").first();
+  const host=frame.locator(".floating-render-canvas"),canvas=host.locator("canvas");
+  await expect(host).toHaveAttribute("data-float-hit-policy","viewport");
+  await expect(canvas).toHaveCSS("pointer-events","auto");
+  const bounds=(await canvas.boundingBox())!;
+  const x=bounds.x+bounds.width*.12,y=bounds.y+bounds.height*.78;
+  expect(await page.evaluate(([px,py])=>document.elementFromPoint(px,py)?.tagName,[x,y]))
+    .toBe("CANVAS");
+  const profileCount=await page.locator("#profile-count").textContent();
+  await page.keyboard.press("r");
+  await page.mouse.click(x,y);
+  expect(await page.locator("#profile-count").textContent()).toBe(profileCount);
+  const original=(await frame.boundingBox())!;
+  const targetBefore=await host.getAttribute("data-camera-target");
+  await page.mouse.move(x,y);
+  await page.mouse.down({button:"middle"});
+  await page.mouse.move(x+56,y+29,{steps:7});
+  await page.mouse.up({button:"middle"});
+  await expect(host).toHaveAttribute("data-last-navigation-action","pan");
+  expect(await host.getAttribute("data-camera-target")).not.toBe(targetBefore);
+  const angleBefore=await host.getAttribute("data-camera-direction");
+  await page.keyboard.down("Shift");
+  await page.mouse.move(x,y);
+  await page.mouse.down({button:"middle"});
+  await page.mouse.move(x+64,y+39,{steps:7});
+  await page.mouse.up({button:"middle"});
+  await page.keyboard.up("Shift");
+  await expect(host).toHaveAttribute("data-last-navigation-action","orbit");
+  expect(await host.getAttribute("data-camera-direction")).not.toBe(angleBefore);
+  const zoom=Number(await host.getAttribute("data-camera-zoom"));
+  await page.mouse.wheel(0,-180);
+  await expect.poll(async()=>Number(await host.getAttribute("data-camera-zoom"))).not.toBe(zoom);
+  const after=(await frame.boundingBox())!;
+  expect(Math.abs(after.x-original.x)+Math.abs(after.y-original.y)).toBeLessThan(2);
+  const nw=(await frame.locator('[data-corner="nw"]').boundingBox())!;
+  await page.mouse.move(nw.x+nw.width/2,nw.y+nw.height/2);
+  await page.mouse.down();
+  await page.mouse.move(nw.x+nw.width/2-40,nw.y+nw.height/2-25,{steps:7});
+  await page.mouse.up();
+  const resized=(await frame.boundingBox())!;
+  expect(resized.width).toBeGreaterThan(after.width+25);
+  expect(resized.height).toBeGreaterThan(after.height+10);
+  expect(Math.abs(resized.x+resized.width-after.x-after.width)).toBeLessThan(3);
+  expect(Math.abs(resized.y+resized.height-after.y-after.height)).toBeLessThan(3);
+  await page.reload();
+  const persisted=(await frame.boundingBox())!;
+  expect(Math.abs(persisted.width-resized.width)).toBeLessThan(3);
+  expect(Math.abs(persisted.height-resized.height)).toBeLessThan(3);
+});
+
+test("independent floating face click latches Start Z without moving viewport",async({page})=>{
+  await page.setViewportSize({width:1440,height:820});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await openMenu(page,"view","view.float.new");
+  const floating=page.locator("#floating-views-layer .floating-render-view").first();
+  const host=floating.locator(".floating-render-canvas");
+  await expect(host).toHaveAttribute("data-rendered-solid","true");
+  await page.locator("#profiles-details summary").click();
+  await page.locator("#profile-list .profile-item").nth(1).click();
+  await page.keyboard.press("e");
+  await expect(page.locator("#extrude-flyout")).toBeVisible();
+  await page.locator("#extrude-z").fill("0");
+  await page.locator("#extrude-z").focus();
+  const initial=(await floating.boundingBox())!;
+  const rect=(await host.boundingBox())!;
+  const x=rect.x+rect.width/2,y=rect.y+rect.height/2;
+  await page.mouse.move(x,y);
+  await expect(host).toHaveAttribute("data-float-hover","true");
+  await page.mouse.click(x,y);
+  await expect(page.locator("#extrude-z")).toHaveValue("8");
+  const after=(await floating.boundingBox())!;
+  expect(Math.abs(after.x-initial.x)+Math.abs(after.y-initial.y)).toBeLessThan(2);
+});
+
+test("independent floating views share render settings but not exact CAD geometry state",async({page})=>{
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await openMenu(page,"view","view.float.new");
+  const host=page.locator("#floating-views-layer .floating-render-canvas").first();
+  const originalVolume=await page.locator("#status").getAttribute("data-volume-mm3");
+  await openMenu(page,"render","dialog.render");
+  await page.locator("#render-ao").check();
+  await page.locator("#render-supersampling").selectOption("1.5");
+  await expect(host).toHaveAttribute("data-ao-enabled","true");
+  await expect(host).toHaveAttribute("data-supersample","1.5");
+  await page.locator('[data-close="render-dialog"]').last().click();
+  expect(await page.locator("#status").getAttribute("data-volume-mm3")).toBe(originalVolume);
+  await expect(page.locator(".preview-panel .preview-root")).toHaveAttribute("data-supersample","1.5");
+});
+
+
+test("floating WebGL2 capability preflight reports actual driver availability",async({page})=>{
+  await page.goto("/");
+  const diagnostic=await page.evaluate(()=>{
+    const canvas=document.createElement("canvas");
+    let reason="";
+    canvas.addEventListener("webglcontextcreationerror",e=>{reason=(e as WebGLContextEvent).statusMessage;});
+    const gl=canvas.getContext("webgl2");
+    const result={available:gl!==null,
+      vendor:gl?.getParameter(gl.VENDOR)??null,
+      renderer:gl?.getParameter(gl.RENDERER)??null,
+      reason,userAgent:navigator.userAgent};
+    gl?.getExtension("WEBGL_lose_context")?.loseContext();
+    return result;
+  });
+  console.log("flatCAD WebGL2 preflight:",JSON.stringify(diagnostic));
+  expect(diagnostic.available,JSON.stringify(diagnostic)).toBe(true);
+});
+
+test("floating view opened during provisional cut retains committed face pick",async({page})=>{
+  await page.setViewportSize({width:1440,height:820});
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Exact solid generated");
+  await page.locator("#profiles-details summary").click();
+  await page.locator("#profile-list .profile-item").nth(1).click();
+  await page.keyboard.press("e");
+  await expect(page.locator("#extrude-flyout")).toBeVisible();
+  await expect(page.locator("#preview")).toHaveAttribute("data-preview-state","ready");
+  await openMenu(page,"view","view.float.new");
+  const host=page.locator("#floating-views-layer .floating-render-canvas").first();
+  await expect(host).toHaveAttribute("data-rendered-solid","true");
+  await page.locator("#extrude-z").fill("0");
+  await page.locator("#extrude-z").focus();
+  const r=(await host.boundingBox())!;
+  await page.mouse.click(r.x+r.width/2,r.y+r.height/2);
+  await expect(page.locator("#extrude-z")).toHaveValue("8");
 });

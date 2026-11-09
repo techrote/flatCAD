@@ -50,11 +50,16 @@ describe("floating CAD view settings",()=>{
     expect(result.floatX).toBeGreaterThanOrEqual(0);
     expect(result.floatY).toBeGreaterThanOrEqual(0);
     expect(result.tileMode).toBe("split");
+    expect(result.floatW).toBe(380);
+    expect(result.floatH).toBe(340);
   });
   it("persists an in-bounds floating mode without changing CAD geometry",()=>{
     expect(validateLayout({...DEFAULT_LAYOUT,tileMode:"float",floatX:0,floatY:1}).tileMode)
       .toBe("float");
     expect(()=>validateLayout({...DEFAULT_LAYOUT,floatX:-.1})).toThrow();
     expect(()=>validateLayout({...DEFAULT_LAYOUT,tileMode:"nonsense"})).toThrow();
+    expect(validateLayout({...DEFAULT_LAYOUT,floatW:460,floatH:290}).floatW).toBe(460);
+    expect(()=>validateLayout({...DEFAULT_LAYOUT,floatW:Infinity})).toThrow();
+    expect(()=>validateLayout({...DEFAULT_LAYOUT,floatH:80})).toThrow();
   });
 });
